@@ -4,6 +4,11 @@
  * Single integration TU for libteleproto3 in tdesktop.
  * The static_assert ABI version-pin lives here (Epic 2 style-guide §3;
  * single-TU rule — stories 2.3/2.4/2.5/2.6 do NOT duplicate it).
+ *
+ * log_sink contract: the lib MUST NOT pass secrets (keys, nonces, plaintext
+ * payload) through fmt/args. Log messages are forwarded to tdesktop's main
+ * log file without scrubbing. Any future lib change that logs secret material
+ * must add a defensive scrubber here before forwarding.
  */
 
 #include "teleproto3_bridge.h"
@@ -24,9 +29,7 @@ static_assert(T3_ABI_VERSION_MAJOR == 0 &&
 #include <QSslSocket>
 #include <QWebSocket>
 
-#include <cassert>
 #include <chrono>
-#include <climits>
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
@@ -35,16 +38,6 @@ static_assert(T3_ABI_VERSION_MAJOR == 0 &&
 #include "logs.h"
 
 namespace Tdesktop::Teleproto3 {
-
-namespace {
-
-// Process-wide monotonic origin used by monotonic_ns_impl.
-// Starting from a single epoch shared across every BridgeContext keeps the
-// lib's clock-skew detector (T3_ERR_CLOCK_BACKWARDS) sane across reconnects.
-const std::chrono::steady_clock::time_point kProcessEpoch =
-    std::chrono::steady_clock::now();
-
-}  // namespace
 
 // -----------------------------------------------------------------------
 // BridgeContext — owns the Qt-side state passed through t3_callbacks_t.ctx
@@ -56,6 +49,7 @@ struct BridgeContext {
     t3_session_t  *session = nullptr;
     QMutex         recvMutex;
     QQueue<QByteArray> recvQueue;
+    int            recvQueueBytes = 0;
     // guard: QObject whose lifetime bounds the binaryMessageReceived
     // connection. Destroyed via deleteLater() to drain pending events safely.
     QObject       *guard = nullptr;
@@ -73,6 +67,15 @@ struct BridgeContext {
         QObject::connect(ws, &QWebSocket::binaryMessageReceived, guard,
             [this](const QByteArray &msg) {
                 QMutexLocker locker(&recvMutex);
+                // Drop frames that would exceed the queue budget to prevent
+                // unbounded memory growth if the lib stalls on frame_recv.
+                constexpr int kMaxFrames = 1024;
+                constexpr int kMaxBytes  = 16 * 1024 * 1024;  // 16 MiB
+                if (recvQueue.size() >= kMaxFrames ||
+                    recvQueueBytes + msg.size() > kMaxBytes) {
+                    return;  // budget exceeded — drop frame silently
+                }
+                recvQueueBytes += msg.size();
                 recvQueue.enqueue(msg);
             },
             Qt::QueuedConnection);
@@ -104,6 +107,7 @@ struct BridgeContext {
 
 // Implements t3_callbacks_t::lower_send (see teleproto3/lib/include/t3.h)
 static int64_t lower_send_impl(void *ctx, const uint8_t *buf, size_t len) {
+    if (len == 0) return 0;
     auto *bc = static_cast<BridgeContext *>(ctx);
     if (bc->tls->state() != QAbstractSocket::ConnectedState) {
         return -1;
@@ -120,6 +124,7 @@ static int64_t lower_send_impl(void *ctx, const uint8_t *buf, size_t len) {
 static int64_t lower_recv_impl(void *ctx, uint8_t *buf, size_t len) {
     // Non-blocking: returns 0 if no bytes are ready.
     // Driven by QSslSocket::readyRead in the host run-loop.
+    if (len == 0) return 0;
     auto *bc = static_cast<BridgeContext *>(ctx);
     if (!bc->tls->bytesAvailable()) {
         return 0;
@@ -140,6 +145,7 @@ static int64_t frame_send_impl(void *ctx, const uint8_t *buf, size_t len, int is
     if (is_binary != 1) {
         return -1;
     }
+    if (len == 0) return 0;
     auto *bc = static_cast<BridgeContext *>(ctx);
     if (bc->ws->state() != QAbstractSocket::ConnectedState) {
         return -1;
@@ -152,8 +158,10 @@ static int64_t frame_send_impl(void *ctx, const uint8_t *buf, size_t len, int is
     // QByteArray::fromRawData would be a UAF once frame_send_impl returns.
     QByteArray msg(reinterpret_cast<const char *>(buf), static_cast<int>(len));
     qint64 n = bc->ws->sendBinaryMessage(msg);
+    // sendBinaryMessage returns bytes queued on the socket (not just this
+    // frame), so use len as the success indicator rather than n directly.
     if (n < 0) return -1;
-    return static_cast<int64_t>(n);
+    return static_cast<int64_t>(len);
 }
 
 // Implements t3_callbacks_t::frame_recv (see teleproto3/lib/include/t3.h)
@@ -179,6 +187,7 @@ static int64_t frame_recv_impl(void *ctx, uint8_t *buf, size_t cap, int *out_is_
     if (out_is_binary) {
         *out_is_binary = 1;
     }
+    bc->recvQueueBytes -= front.size();
     bc->recvQueue.dequeue();
     return static_cast<int64_t>(copy);
 }
@@ -214,12 +223,16 @@ static int rng_impl(void *ctx, uint8_t *buf, size_t len) {
 // Implements t3_callbacks_t::monotonic_ns (see teleproto3/lib/include/t3.h)
 static uint64_t monotonic_ns_impl(void *ctx) {
     (void)ctx;
-    // Process-wide monotonic origin shared across every BridgeContext, so
-    // reconnects (new context, same process) never observe a backwards step.
+    // Meyer's singleton: initialised on first call, safe against dynamic-init
+    // ordering issues that would affect a namespace-scope variable.
+    // Process-wide epoch shared across every BridgeContext so reconnects
+    // (new context, same process) never observe a backwards step.
+    static const std::chrono::steady_clock::time_point kEpoch =
+        std::chrono::steady_clock::now();
     const auto now = std::chrono::steady_clock::now();
-    const auto delta = now - kProcessEpoch;
+    const auto delta = now - kEpoch;
     const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(delta).count();
-    Q_ASSERT(ns >= 0);
+    if (ns < 0) return 0;  // clock went backwards — defensive, not an assert
     return static_cast<uint64_t>(ns);
 }
 
@@ -241,6 +254,15 @@ static void log_sink_impl(void *ctx, int level, const char *fmt, ...) {
     if (written < 0) {
         return;
     }
+    // vsnprintf fills the buffer completely on truncation; overwrite the tail
+    // with a marker so log readers know the message was cut short.
+    if (written >= static_cast<int>(sizeof(msg))) {
+        constexpr char kTrunc[] = "...[T]";
+        constexpr size_t kTruncLen = sizeof(kTrunc) - 1;
+        static_assert(sizeof(msg) > kTruncLen, "msg buffer too small for truncation marker");
+        std::memcpy(msg + sizeof(msg) - kTruncLen - 1, kTrunc, kTruncLen);
+        // null terminator already at msg[sizeof(msg)-1] from vsnprintf
+    }
     Logs::writeMain(QLatin1String("[T3] ") + QString::fromUtf8(msg));
 }
 
@@ -255,18 +277,19 @@ BridgeContext *createContext(QSslSocket *tls, QWebSocket *ws) {
 }
 
 t3_callbacks_t makeCallbacks(BridgeContext *ctx) {
-    // C++20 designated initialisers: field order matches t3_callbacks_t exactly.
-    // struct_size sentinel is REQUIRED by t3_session_bind_callbacks for forward-compat.
+    // Positional aggregate init — field order matches t3_callbacks_t declaration
+    // exactly (struct_size sentinel first; ctx round-trip pointer last).
+    // Update both sides if t3_callbacks_t fields are reordered in a future ABI rev.
     t3_callbacks_t cb = {
-        .struct_size  = sizeof(t3_callbacks_t),
-        .lower_send   = lower_send_impl,
-        .lower_recv   = lower_recv_impl,
-        .frame_send   = frame_send_impl,
-        .frame_recv   = frame_recv_impl,
-        .rng          = rng_impl,
-        .monotonic_ns = monotonic_ns_impl,
-        .log_sink     = log_sink_impl,
-        .ctx          = ctx,
+        sizeof(t3_callbacks_t),  // struct_size  (forward-compat sentinel)
+        lower_send_impl,         // lower_send
+        lower_recv_impl,         // lower_recv
+        frame_send_impl,         // frame_send
+        frame_recv_impl,         // frame_recv
+        rng_impl,                // rng
+        monotonic_ns_impl,       // monotonic_ns
+        log_sink_impl,           // log_sink
+        ctx,                     // ctx  (round-trip opaque pointer)
     };
     return cb;
 }
