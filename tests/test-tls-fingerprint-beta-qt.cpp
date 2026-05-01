@@ -28,6 +28,8 @@
 #include <QStringList>
 #include <QVector>
 
+#include <QHostAddress>
+
 #include <algorithm>
 #include <cstdint>
 #include <limits>
@@ -52,6 +54,7 @@ struct ClientHelloParsed {
     QVector<uint16_t> supportedVersions; // from extension 43
     QVector<uint8_t>  alpnFirstValue;    // from extension 16, first entry
     bool hasSNI = false;
+    QString sniName;                     // parsed from extension 0 (host_name type)
 };
 
 static ClientHelloParsed parseClientHello(const QByteArray &helloBody) {
@@ -112,6 +115,15 @@ static ClientHelloParsed parseClientHello(const QByteArray &helloBody) {
             out.extTypes.append(extType);
         }
         if (extType == 0 && extLen >= 5) {                 // server_name
+            // Parse: list_length(2) + name_type(1) + name_length(2) + name
+            int nameType = d[pos + 2];
+            if (nameType == 0 && extLen >= 5) {            // host_name type
+                int nameLen = (int(d[pos + 3]) << 8) | d[pos + 4];
+                int nameEnd = std::min(pos + 5 + nameLen, extEnd);
+                out.sniName = QString::fromLatin1(
+                    reinterpret_cast<const char *>(d + pos + 5),
+                    nameEnd - (pos + 5));
+            }
             out.hasSNI = true;
         } else if (extType == 10 && extLen >= 2) {         // supported_groups
             int grpLen = (int(d[pos]) << 8) | d[pos + 1];
@@ -226,7 +238,12 @@ static QString computeJA4(const ClientHelloParsed &ch) {
     else if (highestVer == 0x0301) tlsVer = "10";
     else                           tlsVer = "00";
 
-    QString sniFlag = ch.hasSNI ? QStringLiteral("d") : QStringLiteral("i");
+    // JA4 SNI flag: "d" for domain SNI, "i" for IP or absent.
+    // RFC 6066 §3 forbids IP literals in SNI; non-compliant clients may still
+    // send them, so check explicitly rather than assuming hasSNI implies domain.
+    bool sniIsDomain = ch.hasSNI && !ch.sniName.isEmpty() &&
+        QHostAddress(ch.sniName).isNull();  // isNull() means not a valid IP
+    QString sniFlag = sniIsDomain ? QStringLiteral("d") : QStringLiteral("i");
 
     // FoxIO JA4 caps cipher / ext counts at 99 (2 digits). Clamp explicitly.
     int numCiphers = (int)std::min(ch.cipherSuites.size(), (qsizetype)99);
