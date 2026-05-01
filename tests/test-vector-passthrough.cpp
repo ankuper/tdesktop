@@ -70,7 +70,9 @@ static const char *describe(t3_result_t r) {
 // that satisfy that class. v0.1.0 vectors use coarse class names ("MALFORMED")
 // while the lib may return a more specific sub-code; this mapping enforces
 // that the sub-code belongs to the documented family.
-static QSet<t3_result_t> errorFamily(const QString &cls) {
+// Error families for t3_secret_parse — includes secret-specific enumerants
+// (host/key/path errors) that cannot arise from t3_header_parse.
+static QSet<t3_result_t> secretFormatErrorFamily(const QString &cls) {
     if (cls == QLatin1String("MALFORMED")) {
         return {T3_ERR_MALFORMED,
                 T3_ERR_HOST_EMPTY, T3_ERR_HOST_INVALID, T3_ERR_HOST_NON_ASCII,
@@ -92,6 +94,24 @@ static QSet<t3_result_t> errorFamily(const QString &cls) {
         return {T3_ERR_INTERNAL};
     }
     return {};  // unknown class → empty set, caller fails the assertion
+}
+
+// Error families for t3_header_parse — restricted to errors that can
+// actually arise from a 4-byte header parse (no host/key/path errors).
+static QSet<t3_result_t> sessionHeaderErrorFamily(const QString &cls) {
+    if (cls == QLatin1String("MALFORMED")) {
+        return {T3_ERR_MALFORMED};
+    }
+    if (cls == QLatin1String("UNSUPPORTED_VERSION")) {
+        return {T3_ERR_UNSUPPORTED_VERSION};
+    }
+    if (cls == QLatin1String("INVALID_ARG")) {
+        return {T3_ERR_INVALID_ARG};
+    }
+    if (cls == QLatin1String("INTERNAL")) {
+        return {T3_ERR_INTERNAL};
+    }
+    return {};
 }
 
 // Safe wrapper around t3_strerror to handle NULL returns for unknown enumerants.
@@ -231,7 +251,7 @@ private slots:
                          qPrintable(QString("Vector %1: expected error %2, got T3_OK")
                                     .arg(id, expectError)));
                 if (!expectError.isEmpty()) {
-                    QSet<t3_result_t> family = errorFamily(expectError);
+                    QSet<t3_result_t> family = secretFormatErrorFamily(expectError);
                     QVERIFY2(!family.isEmpty(),
                              qPrintable(QString("Vector %1: unknown error class %2")
                                         .arg(id, expectError)));
@@ -284,7 +304,7 @@ private slots:
                          qPrintable(QString("Vector %1: expected error, got T3_OK")
                                     .arg(id)));
                 if (!expectError.isEmpty()) {
-                    QSet<t3_result_t> family = errorFamily(expectError);
+                    QSet<t3_result_t> family = sessionHeaderErrorFamily(expectError);
                     QVERIFY2(!family.isEmpty(),
                              qPrintable(QString("Vector %1: unknown error class %2")
                                         .arg(id, expectError)));
