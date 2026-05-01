@@ -23,6 +23,38 @@ project(Telegram
     HOMEPAGE_URL "https://desktop.telegram.org"
 )
 
+# ── Story 2-1 tests-only mode ────────────────────────────────────────────────
+# Pass -DTELEPROTO3_TESTS_ONLY=ON to configure ONLY the Story 2-1 QtTest
+# binaries without pulling in the full tdesktop dependency graph.
+# Required for CI jobs (ar-s12-nm-audit.yml) that install only Qt6 + ninja.
+option(TELEPROTO3_TESTS_ONLY "Configure only Story 2-1 test targets (skips full Telegram build)" OFF)
+if(TELEPROTO3_TESTS_ONLY)
+    set(LIBTELEPROTO3_ROOT
+        "${CMAKE_SOURCE_DIR}/../../teleproto3"
+        CACHE PATH "Root of the libteleproto3 source tree"
+    )
+    set(LIBTELEPROTO3_LIB_PATH "${LIBTELEPROTO3_ROOT}/lib/build/libteleproto3.a")
+    set(LIBTELEPROTO3_INCLUDE_DIR "${LIBTELEPROTO3_ROOT}/lib/include")
+    if(NOT EXISTS "${LIBTELEPROTO3_INCLUDE_DIR}/t3.h")
+        message(FATAL_ERROR
+            "libteleproto3 not found at ${LIBTELEPROTO3_ROOT}.\n"
+            "Set -DLIBTELEPROTO3_ROOT=... or check your workspace layout.")
+    endif()
+    add_library(teleproto3 STATIC IMPORTED GLOBAL)
+    set_target_properties(teleproto3 PROPERTIES
+        IMPORTED_LOCATION                "${LIBTELEPROTO3_LIB_PATH}"
+        IMPORTED_LOCATION_DEBUG          "${LIBTELEPROTO3_LIB_PATH}"
+        IMPORTED_LOCATION_RELEASE        "${LIBTELEPROTO3_LIB_PATH}"
+        IMPORTED_LOCATION_RELWITHDEBINFO "${LIBTELEPROTO3_LIB_PATH}"
+        IMPORTED_LOCATION_MINSIZEREL     "${LIBTELEPROTO3_LIB_PATH}"
+        INTERFACE_INCLUDE_DIRECTORIES    "${LIBTELEPROTO3_INCLUDE_DIR}"
+    )
+    enable_testing()
+    add_subdirectory(tests)
+    return()
+endif()
+# ── End tests-only mode ──────────────────────────────────────────────────────
+
 if (APPLE)
     enable_language(OBJC OBJCXX)
 endif()
@@ -64,3 +96,12 @@ set(desktop_app_skip_libs
 
 add_subdirectory(cmake)
 add_subdirectory(Telegram)
+
+# Tests — Story 2-1 conformance harness + AR-C3 fingerprint-lock test.
+# Off by default; enable with -DTELEPROTO3_TESTS=ON (full build) or
+# -DTELEPROTO3_TESTS_ONLY=ON (tests-only configure, no Telegram).
+option(TELEPROTO3_TESTS "Build libteleproto3 conformance + fingerprint tests" OFF)
+if(TELEPROTO3_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
