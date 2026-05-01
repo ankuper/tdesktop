@@ -53,6 +53,36 @@ endif()
 
 set_target_properties(Telegram PROPERTIES AUTOMOC ON)
 
+# libteleproto3 — statically imported (Epic 2 story 2.1; anti-pattern §12.10).
+# Built upstream by teleproto3/lib/build/Makefile (Epic 1 output).
+#
+# LIBTELEPROTO3_ROOT is the root of the libteleproto3 source tree. By default
+# it points at the workspace-sibling `teleproto3/` directory (two levels up
+# from this CMake source root, which is `tdesktop/tdesktop/Telegram`). Override
+# via -DLIBTELEPROTO3_ROOT=... if your checkout uses a different layout.
+set(LIBTELEPROTO3_ROOT
+    "${CMAKE_SOURCE_DIR}/../../teleproto3"
+    CACHE PATH "Root of the libteleproto3 source tree"
+)
+set(LIBTELEPROTO3_LIB_PATH "${LIBTELEPROTO3_ROOT}/lib/build/libteleproto3.a")
+set(LIBTELEPROTO3_INCLUDE_DIR "${LIBTELEPROTO3_ROOT}/lib/include")
+
+if(NOT EXISTS "${LIBTELEPROTO3_INCLUDE_DIR}/t3.h")
+    message(FATAL_ERROR
+        "libteleproto3 not found at ${LIBTELEPROTO3_ROOT}.\n"
+        "Set -DLIBTELEPROTO3_ROOT=... or check your workspace layout.")
+endif()
+
+add_library(teleproto3 STATIC IMPORTED GLOBAL)
+set_target_properties(teleproto3 PROPERTIES
+    IMPORTED_LOCATION                "${LIBTELEPROTO3_LIB_PATH}"
+    IMPORTED_LOCATION_DEBUG          "${LIBTELEPROTO3_LIB_PATH}"
+    IMPORTED_LOCATION_RELEASE        "${LIBTELEPROTO3_LIB_PATH}"
+    IMPORTED_LOCATION_RELWITHDEBINFO "${LIBTELEPROTO3_LIB_PATH}"
+    IMPORTED_LOCATION_MINSIZEREL     "${LIBTELEPROTO3_LIB_PATH}"
+    INTERFACE_INCLUDE_DIRECTORIES    "${LIBTELEPROTO3_INCLUDE_DIR}"
+)
+
 target_link_libraries(Telegram
 PRIVATE
     tdesktop::lib_tgcalls
@@ -88,6 +118,7 @@ PRIVATE
     desktop-app::external_openssl
     desktop-app::external_openal
     desktop-app::external_xxhash
+    teleproto3
 )
 
 if (NOT DESKTOP_APP_DISABLE_SWIFT6)
@@ -1488,6 +1519,8 @@ PRIVATE
     mtproto/connection_resolving.h
     mtproto/connection_tcp.cpp
     mtproto/connection_tcp.h
+    mtproto/teleproto3_bridge.cpp
+    mtproto/teleproto3_bridge.h
     mtproto/core_types.h
     mtproto/dedicated_file_loader.cpp
     mtproto/dedicated_file_loader.h
@@ -2215,6 +2248,44 @@ target_sources(Telegram PRIVATE ${entitlement_sources})
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/Telegram PREFIX Resources FILES ${entitlement_sources})
 
 target_include_directories(Telegram PRIVATE ${src_loc})
+
+# AR-S12 nm-audit: verify libteleproto3.a has no host-stack symbol leakage.
+# Scope: the static archive ONLY (D2 resolution, story 2-1) — host-stack
+# neutrality is a property of the lib, not of the linked Telegram binary.
+# Fails the build if any TLS/WS/OS-specific symbol is found in the lib object.
+# Permissions: read-only (no push/PR/issue write scope needed — Epic 1 §13).
+#
+# Skipped on Windows (no `nm`/`grep` in default MSVC toolchain). The CI
+# workflow .github/workflows/ar-s12-nm-audit.yml runs the same audit on Linux
+# and is the source of truth; the local POST_BUILD is convenience for UNIX devs.
+if(UNIX)
+    set(_t3_audit_script "${CMAKE_CURRENT_BINARY_DIR}/ar-s12-nm-audit.sh")
+    file(WRITE "${_t3_audit_script}" "#!/bin/sh
+set -eu
+LIB=\"$1\"
+if [ ! -f \"$LIB\" ]; then
+    echo \"AR-S12 nm-audit: lib not found at $LIB\" >&2
+    exit 1
+fi
+# Use POSIX format (`nm -P`) for a stable cross-platform symbol-name column.
+# The regex anchors host-stack tokens with word boundaries to avoid matching
+# benign substrings like `cxa_finalize` containing `cf_` etc.
+LEAKS=$(nm -P \"$LIB\" 2>/dev/null | awk '{print \$1}' \\
+    | grep -iE '(^|_)(ssl|tls|openssl|boringssl|mbedtls|gnutls|wolfssl|schannel|securetransport|cf|cfnetwork|nw|winhttp|bcrypt|secitem|qt|qwebsocket|nwwebsocket|conscrypt|okhttp|websocket|ws_[a-z]*frame)([_$]|$)' \\
+    || true)
+if [ -n \"$LEAKS\" ]; then
+    echo \"AR-S12 nm-audit: lib leaks host-stack symbol(s):\" >&2
+    echo \"$LEAKS\" >&2
+    exit 1
+fi
+exit 0
+")
+    add_custom_command(TARGET Telegram POST_BUILD
+        COMMAND sh "${_t3_audit_script}" "${LIBTELEPROTO3_LIB_PATH}"
+        COMMENT "AR-S12 nm-audit: checking libteleproto3.a for host-stack symbol leakage"
+        VERBATIM
+    )
+endif()
 
 target_compile_definitions(Telegram
 PRIVATE

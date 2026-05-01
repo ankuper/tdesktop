@@ -1,0 +1,102 @@
+# AR-S12 nm-audit + Story 2-1 test suite.
+#
+# Two gates:
+#   1) AR-S12 nm-audit — verifies libteleproto3.a has no host-stack symbol
+#      leakage (Epic 1 style-guide §10 + Epic 2 AC #1). Scope: lib archive
+#      ONLY (D2 resolution, story 2-1) — host-stack neutrality is a property
+#      of the lib, not of the linked Telegram binary.
+#   2) Story 2-1 tests — runs the QtTest binaries (vector pass-through +
+#      AR-C3 β-Qt fingerprint-lock) via CTest. Gates AC #3 and AC #4.
+#
+# Upstream: libteleproto3 is the local `teleproto3/` subtree of the MTProxy
+# workspace (Story 2-1 D6 resolution + project-memory teleproxy_upstream_local).
+# No public mirror exists at v0.1.0; checkout uses the workspace layout.
+#
+# Permissions: contents: read ONLY (Epic 1 style-guide §13 — least-privilege).
+# This workflow does NOT create PRs, push branches, open issues, or comment
+# on PRs — write scopes are rejected.
+
+name: AR-S12 nm-audit + Story 2-1 tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  audit-and-test:
+    name: AR-S12 lib audit + Story 2-1 tests
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout MTProxy workspace
+        uses: actions/checkout@v4
+        with:
+          path: workspace
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+              build-essential cmake ninja-build pkg-config \
+              qt6-base-dev qt6-base-dev-tools \
+              qt6-websockets-dev libqt6websockets6 \
+              qt6-tools-dev qt6-tools-dev-tools \
+              libssl-dev zlib1g-dev binutils
+
+      - name: Build libteleproto3.a
+        run: |
+          set -euo pipefail
+          cd workspace/teleproto3/lib/build
+          make -j"$(nproc)" libteleproto3.a
+
+      - name: Run AR-S12 nm-audit (lib-only scope)
+        run: |
+          set -euo pipefail
+          LIB="workspace/teleproto3/lib/build/libteleproto3.a"
+          if [ ! -f "$LIB" ]; then
+              echo "AR-S12 nm-audit: lib not found at $LIB" >&2
+              exit 1
+          fi
+          echo "Scanning: $LIB"
+          # POSIX format → stable cross-platform symbol-name column.
+          # Word-boundary anchors avoid false positives on benign substrings.
+          LEAKS=$(nm -P "$LIB" | awk '{print $1}' \
+              | grep -iE '(^|_)(ssl|tls|openssl|boringssl|mbedtls|gnutls|wolfssl|schannel|securetransport|cf|cfnetwork|nw|winhttp|bcrypt|secitem|qt|qwebsocket|nwwebsocket|conscrypt|okhttp|websocket|ws_[a-z]*frame)([_$]|$)' \
+              || true)
+          if [ -n "$LEAKS" ]; then
+              echo "AR-S12 VIOLATION: lib leaks host-stack symbol(s):" >&2
+              echo "$LEAKS" >&2
+              exit 1
+          fi
+          echo "AR-S12 nm-audit PASSED: no host-stack symbols found"
+
+      - name: Configure Story 2-1 tests (tests-only mode — skips full Telegram build)
+        run: |
+          set -euo pipefail
+          cd workspace/tdesktop/tdesktop
+          cmake -S . -B build \
+              -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DTELEPROTO3_TESTS_ONLY=ON \
+              -DLIBTELEPROTO3_ROOT="${GITHUB_WORKSPACE}/workspace/teleproto3"
+
+      - name: Build Story 2-1 test binaries
+        run: |
+          set -euo pipefail
+          cd workspace/tdesktop/tdesktop/build
+          cmake --build . --target test-vector-passthrough test-tls-fingerprint-beta-qt -j"$(nproc)"
+
+      - name: Run Story 2-1 tests
+        run: |
+          set -euo pipefail
+          cd workspace/tdesktop/tdesktop/build
+          ctest --output-on-failure --tests-regex 'test-(vector-passthrough|tls-fingerprint-beta-qt)'
