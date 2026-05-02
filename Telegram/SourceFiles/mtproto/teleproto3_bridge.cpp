@@ -22,6 +22,7 @@ static_assert(T3_ABI_VERSION_MAJOR == 0 &&
 
 #include <QAbstractSocket>
 #include <QCoreApplication>
+#include <QMaskGenerator>
 #include <QMutex>
 #include <QMutexLocker>
 #include <QQueue>
@@ -29,6 +30,7 @@ static_assert(T3_ABI_VERSION_MAJOR == 0 &&
 #include <QSslSocket>
 #include <QWebSocket>
 
+#include <array>
 #include <chrono>
 #include <cstdarg>
 #include <cstdio>
@@ -296,6 +298,38 @@ t3_callbacks_t makeCallbacks(BridgeContext *ctx) {
 
 void destroyContext(BridgeContext *ctx) {
     delete ctx;
+}
+
+// FR23: CSPRNG mask generator. Drives Sec-WebSocket-Key (via Qt's
+// QWebSocketPrivate::generateKey -> maskGenerator->nextMask() x4) AND
+// per-frame masking. Replaces QDefaultMaskGenerator (which uses
+// QRandomGenerator::global() per Qt source).
+// EXTEND from story 2.4 — write-authority owned by story 2.1.
+class CsprngMaskGenerator final : public QMaskGenerator {
+public:
+    explicit CsprngMaskGenerator(QObject *parent = nullptr)
+        : QMaskGenerator(parent) {}
+
+    bool seed() noexcept override {
+        // QRandomGenerator::system() is OS-CSPRNG-backed; no seeding needed.
+        return true;
+    }
+
+    quint32 nextMask() noexcept override {
+        // Anti-pattern §12.12: never qrand()/rand()/timestamp-seed.
+        // QRandomGenerator::system() reads from /dev/urandom on Linux,
+        // BCryptGenRandom on Windows, SecRandomCopyBytes on macOS.
+        quint32 value = QRandomGenerator::system()->generate();
+        // RFC 6455: a mask of zero has special meaning; reroll.
+        while (Q_UNLIKELY(value == 0)) {
+            value = QRandomGenerator::system()->generate();
+        }
+        return value;
+    }
+};
+
+QObject *makeCsprngMaskGenerator(QObject *parent) {
+    return new CsprngMaskGenerator(parent);
 }
 
 }  // namespace Tdesktop::Teleproto3

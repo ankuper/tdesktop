@@ -1,0 +1,20 @@
+---
+story: "2.4"
+last_updated: 2026-05-02
+methodology: aggregate-only-no-per-event-raw  # Epic 2 §9
+notes: |
+  AC #2: Shannon entropy ≥ 7.9 bits/byte over N=1000 16-byte keys.
+  FR23: Sec-WebSocket-Key sourced from the CSPRNG QMaskGenerator
+  (Tdesktop::Teleproto3::makeCsprngMaskGenerator), which Qt's
+  QWebSocketPrivate::generateKey() invokes for the wire key.
+  Source: QRandomGenerator::system() exclusively (never global / qrand / timestamp).
+  Anti-pattern §12.12 verified: zero banned RNG tokens in bridge code.
+  D1 (story-2-4 review): mask-generator approach replaces the dead-code
+  setRawHeader path that Qt6 was overwriting internally.
+  Full 24-hour soak (T3_WS_KEY_SOAK=1, deferred D2): scheduled weekly,
+  drives 1000 handshakes against live v2-deployment proxy.
+---
+
+# WS-Key entropy results (aggregate-only per epic-2-style-guide §9, append-only per §14).
+# CI appends one entry per run; older entries preserved.
+entropy_results:

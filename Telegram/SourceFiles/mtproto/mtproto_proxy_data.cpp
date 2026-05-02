@@ -7,8 +7,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "mtproto/mtproto_proxy_data.h"
 
+#include "mtproto/teleproto3_bridge.h"
+
 #include "base/qthelp_url.h"
 #include "base/qt/qt_string_view.h"
+
+#include <openssl/crypto.h>
 
 namespace MTP {
 namespace {
@@ -143,6 +147,17 @@ namespace {
 	return bytes::make_vector(bytes::make_span(result));
 }
 
+// Decodes hex or base64url-encoded password string to raw bytes.
+// Returns empty vector on failure.
+[[nodiscard]] bytes::vector DecodeProxyPassword(const QString &password) {
+	if (IsHexMtprotoPassword(password)) {
+		return SecretFromHexMtprotoPassword(password);
+	} else if (IsBase64UrlMtprotoPassword(password)) {
+		return SecretFromBase64UrlMtprotoPassword(password);
+	}
+	return {};
+}
+
 } // namespace
 
 bool ProxyData::valid() const {
@@ -154,6 +169,30 @@ ProxyData::Status ProxyData::status() const {
 		return Status::Invalid;
 	} else if (type == Type::Mtproto) {
 		return MtprotoPasswordStatus(password);
+	} else if (type == Type::Mtproto3) {
+		const auto raw = DecodeProxyPassword(password);
+		if (raw.size() < 18
+			|| static_cast<uint8_t>(raw[0]) != 0xff) {
+			return Status::IncorrectSecret;
+		}
+		t3_secret_t *rawSecret = nullptr;
+		const auto rc = t3_secret_parse(
+			reinterpret_cast<const uint8_t *>(raw.data()),
+			raw.size(),
+			&rawSecret);
+		const Tdesktop::Teleproto3::SecretGuard guard(rawSecret);
+		switch (rc) {
+		case T3_OK:
+			break;
+		case T3_ERR_MALFORMED:
+		case T3_ERR_UNSUPPORTED_VERSION:
+			return Status::IncorrectSecret;
+		case T3_ERR_INVALID_ARG:
+			return Status::Invalid;
+		default:
+			return Status::IncorrectSecret;
+		}
+		return Status::Valid;
 	}
 	return Status::Valid;
 }
@@ -166,7 +205,9 @@ bool ProxyData::tryCustomResolve() const {
 	static const auto RegExp = QRegularExpression(
 		QStringLiteral("^\\d+\\.\\d+\\.\\d+\\.\\d+$")
 	);
-	return (type == Type::Socks5 || type == Type::Mtproto)
+	return (type == Type::Socks5
+		|| type == Type::Mtproto
+		|| type == Type::Mtproto3)
 		&& !qthelp::is_ipv6(host)
 		&& !RegExp.match(host).hasMatch();
 }
@@ -182,6 +223,66 @@ bytes::vector ProxyData::secretFromMtprotoPassword() const {
 	return {};
 }
 
+bytes::vector ProxyData::secretFromType3Password() const {
+	Expects(type == Type::Mtproto3);
+
+	const auto raw = DecodeProxyPassword(password);
+	// Minimum: 0xff marker + 16 key bytes + 1 domain byte = 18
+	if (raw.size() < 18 || static_cast<uint8_t>(raw[0]) != 0xff) {
+		return {};
+	}
+	t3_secret_t *rawSecret = nullptr;
+	const auto rc = t3_secret_parse(
+		reinterpret_cast<const uint8_t *>(raw.data()),
+		raw.size(),
+		&rawSecret);
+	const Tdesktop::Teleproto3::SecretGuard guard(rawSecret);
+	if (rc != T3_OK) {
+		return {};
+	}
+	// Return 0xff marker + 16 key octets (17 bytes total)
+	return bytes::vector(raw.begin(), raw.begin() + 17);
+}
+
+bytes::vector ProxyData::type3KeyOctets() const {
+	if (type != Type::Mtproto3) {
+		return {};
+	}
+	const auto raw = DecodeProxyPassword(password);
+	if (raw.size() < 18 || static_cast<uint8_t>(raw[0]) != 0xff) {
+		return {};
+	}
+	t3_secret_t *rawSecret = nullptr;
+	const auto rc = t3_secret_parse(
+		reinterpret_cast<const uint8_t *>(raw.data()),
+		raw.size(),
+		&rawSecret);
+	const Tdesktop::Teleproto3::SecretGuard guard(rawSecret);
+	if (rc != T3_OK) {
+		return {};
+	}
+	// Return ONLY the 16 raw key octets (bytes [1..16])
+	return bytes::vector(raw.begin() + 1, raw.begin() + 17);
+}
+
+bool ProxyData::sameType3Key(const ProxyData &other) const {
+	if (type != Type::Mtproto3 || other.type != Type::Mtproto3) {
+		return false;
+	}
+	auto myKey = type3KeyOctets();
+	auto otherKey = other.type3KeyOctets();
+	if (myKey.size() != 16 || otherKey.size() != 16) {
+		return false;
+	}
+	const auto equal = (CRYPTO_memcmp(
+		myKey.data(),
+		otherKey.data(),
+		16) == 0);
+	OPENSSL_cleanse(myKey.data(), 16);
+	OPENSSL_cleanse(otherKey.data(), 16);
+	return equal;
+}
+
 ProxyData::operator bool() const {
 	return valid();
 }
@@ -194,7 +295,8 @@ bool ProxyData::operator==(const ProxyData &other) const {
 		&& (host == other.host)
 		&& (port == other.port)
 		&& (user == other.user)
-		&& (password == other.password);
+		&& (password == other.password)
+		&& (wsPath == other.wsPath);
 }
 
 bool ProxyData::operator!=(const ProxyData &other) const {
@@ -225,14 +327,16 @@ ProxyData ToDirectIpProxy(const ProxyData &proxy, int ipIndex) {
 		proxy.resolvedIPs[ipIndex],
 		proxy.port,
 		proxy.user,
-		proxy.password
+		proxy.password,
+		proxy.wsPath
 	};
 }
 
 QNetworkProxy ToNetworkProxy(const ProxyData &proxy) {
 	if (proxy.type == ProxyData::Type::None) {
 		return QNetworkProxy::DefaultProxy;
-	} else if (proxy.type == ProxyData::Type::Mtproto) {
+	} else if (proxy.type == ProxyData::Type::Mtproto
+		|| proxy.type == ProxyData::Type::Mtproto3) {
 		return QNetworkProxy::NoProxy;
 	}
 	return QNetworkProxy(
@@ -243,6 +347,40 @@ QNetworkProxy ToNetworkProxy(const ProxyData &proxy) {
 		proxy.port,
 		proxy.user,
 		proxy.password);
+}
+
+// EXTEND from story 2.4 — write-authority owned by story 2.2.
+// At app startup (before any UI), call IsType3SecureStorageReady().
+// If false, the client MUST refuse to start, surface lng_t3_secure_storage_unavailable,
+// and exit cleanly (NFR13, NFR20, anti-pattern §12.3, epic-2-style-guide §7).
+//
+// CALL-SITE WIRING: forward-citation to story 2.9 (macOS dev-build startup).
+// Story 2.9 is responsible for adding the early-init hook that calls
+// IsType3SecureStorageReady() before Application::run() instantiates any UI.
+// The hook should: (a) call this function, (b) on false, log via Logs::Main()
+// then return EXIT_FAILURE, (c) on true, proceed normally. No retry loop.
+// (Story 2.9 spec must include this gate; tracked in 2-9-macos-release follow-up.)
+bool IsType3SecureStorageReady() {
+	return Tdesktop::Teleproto3::SecureStore::isAvailable();
+}
+
+bool StoreType3SecretKey(const ProxyData &proxy, const QString &account) {
+	if (proxy.type != ProxyData::Type::Mtproto3) {
+		return false;
+	}
+	const auto key = proxy.type3KeyOctets();
+	if (key.size() != 16) {
+		return false;
+	}
+	const auto qkey = QByteArray(
+		reinterpret_cast<const char*>(key.data()),
+		static_cast<int>(key.size()));
+	return Tdesktop::Teleproto3::SecureStore::store(qkey, account);
+}
+
+bytes::vector LoadType3SecretKey(const QString &account) {
+	const auto qkey = Tdesktop::Teleproto3::SecureStore::load(account);
+	return bytes::make_vector(bytes::make_span(qkey));
 }
 
 } // namespace MTP
