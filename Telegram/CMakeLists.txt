@@ -1470,8 +1470,17 @@ PRIVATE
     mtproto/connection_resolving.h
     mtproto/connection_tcp.cpp
     mtproto/connection_tcp.h
+    mtproto/connection_teleproto3.cpp
+    mtproto/connection_teleproto3.h
+    mtproto/details/network_change_observer_linux.cpp
+    mtproto/details/network_change_observer_mac.mm
+    mtproto/details/network_change_observer_win.cpp
     mtproto/teleproto3_bridge.cpp
     mtproto/teleproto3_bridge.h
+    mtproto/secure_store.h
+    $<$<BOOL:${WIN32}>:mtproto/secure_store_win.cpp>
+    $<$<BOOL:${APPLE}>:mtproto/secure_store_mac.mm>
+    $<$<BOOL:${LINUX}>:mtproto/secure_store_linux.cpp>
     mtproto/core_types.h
     mtproto/dedicated_file_loader.cpp
     mtproto/dedicated_file_loader.h
