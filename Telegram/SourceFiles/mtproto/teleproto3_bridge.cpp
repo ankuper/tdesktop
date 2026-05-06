@@ -11,24 +11,22 @@
  * must add a defensive scrubber here before forwarding.
  */
 
-#include "teleproto3_bridge.h"
+#include "mtproto/teleproto3_bridge.h"
 
-// ABI version-pin: this story targets lib-v0.1.0 (Epic 2 style-guide §3).
-// Rebuild lib or bump these macros if the ABI major/minor/patch changes.
+// ABI version-pin: updated to lib-v0.1.1 by Story 1a-1 (Epic 2 style-guide §3).
+// lib-v0.1.1 is additive (T3_CMD_BENCH enum + parser change); no Epic 2 code path changed.
 static_assert(T3_ABI_VERSION_MAJOR == 0 &&
               T3_ABI_VERSION_MINOR == 1 &&
-              T3_ABI_VERSION_PATCH == 0,
-              "Epic 2 expects lib-v0.1.0; rebuild lib or update macros");
+              T3_ABI_VERSION_PATCH == 1,
+              "Bridge expects lib-v0.1.1; rebuild lib or update macros");
 
-#include <QAbstractSocket>
+#include <QtNetwork/QAbstractSocket>
 #include <QCoreApplication>
-#include <QMaskGenerator>
 #include <QMutex>
 #include <QMutexLocker>
 #include <QQueue>
 #include <QRandomGenerator>
-#include <QSslSocket>
-#include <QWebSocket>
+#include <QtNetwork/QSslSocket>
 
 #include <array>
 #include <chrono>
@@ -47,7 +45,7 @@ namespace Tdesktop::Teleproto3 {
 
 struct BridgeContext {
     QSslSocket    *tls;
-    QWebSocket    *ws;
+    MiniWebSocket *ws;
     t3_session_t  *session = nullptr;
     QMutex         recvMutex;
     QQueue<QByteArray> recvQueue;
@@ -56,7 +54,7 @@ struct BridgeContext {
     // connection. Destroyed via deleteLater() to drain pending events safely.
     QObject       *guard = nullptr;
 
-    BridgeContext(QSslSocket *tlsSocket, QWebSocket *wsSocket)
+    BridgeContext(QSslSocket *tlsSocket, MiniWebSocket *wsSocket)
         : tls(tlsSocket), ws(wsSocket)
     {
         Q_ASSERT(tls);
@@ -66,7 +64,7 @@ struct BridgeContext {
         // on the same thread as binaryMessageReceived emission, eliminating
         // the cross-thread race on recvQueue.
         guard->moveToThread(ws->thread());
-        QObject::connect(ws, &QWebSocket::binaryMessageReceived, guard,
+        QObject::connect(ws, &MiniWebSocket::binaryMessageReceived, guard,
             [this](const QByteArray &msg) {
                 QMutexLocker locker(&recvMutex);
                 // Drop frames that would exceed the queue budget to prevent
@@ -87,7 +85,7 @@ struct BridgeContext {
         if (guard) {
             // Disconnect first: prevents any new binaryMessageReceived events
             // from being queued to guard after this point.
-            QObject::disconnect(ws, &QWebSocket::binaryMessageReceived,
+            QObject::disconnect(ws, &MiniWebSocket::binaryMessageReceived,
                                 guard, nullptr);
             // Purge already-queued events targeting guard so they cannot fire
             // after BridgeContext memory is freed (lambda captures `this`).
@@ -155,7 +153,7 @@ static int64_t frame_send_impl(void *ctx, const uint8_t *buf, size_t len, int is
     if (len > static_cast<size_t>(std::numeric_limits<int>::max())) {
         return -1;
     }
-    // Copy the buffer: QWebSocket may queue the QByteArray across threads
+    // Copy the buffer: MiniWebSocket may queue the QByteArray across threads
     // for asynchronous transmission; aliasing the caller's buffer via
     // QByteArray::fromRawData would be a UAF once frame_send_impl returns.
     QByteArray msg(reinterpret_cast<const char *>(buf), static_cast<int>(len));
@@ -168,7 +166,7 @@ static int64_t frame_send_impl(void *ctx, const uint8_t *buf, size_t len, int is
 
 // Implements t3_callbacks_t::frame_recv (see teleproto3/lib/include/t3.h)
 static int64_t frame_recv_impl(void *ctx, uint8_t *buf, size_t cap, int *out_is_binary) {
-    // Drains the queue populated by QWebSocket::binaryMessageReceived.
+    // Drains the queue populated by MiniWebSocket::binaryMessageReceived.
     // Returns 0 if queue is empty (non-blocking), -1 on cap-too-small.
     auto *bc = static_cast<BridgeContext *>(ctx);
     QMutexLocker locker(&bc->recvMutex);
@@ -272,7 +270,7 @@ static void log_sink_impl(void *ctx, int level, const char *fmt, ...) {
 // Public functions
 // -----------------------------------------------------------------------
 
-BridgeContext *createContext(QSslSocket *tls, QWebSocket *ws) {
+BridgeContext *createContext(QSslSocket *tls, MiniWebSocket *ws) {
     Q_ASSERT(tls);
     Q_ASSERT(ws);
     return new BridgeContext(tls, ws);
@@ -300,36 +298,140 @@ void destroyContext(BridgeContext *ctx) {
     delete ctx;
 }
 
-// FR23: CSPRNG mask generator. Drives Sec-WebSocket-Key (via Qt's
-// QWebSocketPrivate::generateKey -> maskGenerator->nextMask() x4) AND
-// per-frame masking. Replaces QDefaultMaskGenerator (which uses
-// QRandomGenerator::global() per Qt source).
-// EXTEND from story 2.4 — write-authority owned by story 2.1.
-class CsprngMaskGenerator final : public QMaskGenerator {
-public:
-    explicit CsprngMaskGenerator(QObject *parent = nullptr)
-        : QMaskGenerator(parent) {}
+// -----------------------------------------------------------------------
+// MiniWebSocket Implementation
+// -----------------------------------------------------------------------
+MiniWebSocket::MiniWebSocket(QSslSocket *tls, const QString &host, const QString &path, QObject *parent)
+	: QObject(parent), _tls(tls), _host(host), _path(path) {
+	QObject::connect(_tls, &QSslSocket::readyRead, this, &MiniWebSocket::onReadyRead);
+	QObject::connect(_tls, &QSslSocket::disconnected, this, &MiniWebSocket::disconnected);
+}
 
-    bool seed() noexcept override {
-        // QRandomGenerator::system() is OS-CSPRNG-backed; no seeding needed.
-        return true;
-    }
+void MiniWebSocket::open() {
+	if (_tls->state() != QAbstractSocket::ConnectedState) return;
+	
+	QByteArray keyRaw;
+	keyRaw.resize(16);
+	auto *gen = QRandomGenerator::system();
+	for (int i = 0; i < 4; ++i) {
+		quint32 val = gen->generate();
+		std::memcpy(keyRaw.data() + i * 4, &val, 4);
+	}
+	QString key = QString::fromLatin1(keyRaw.toBase64());
 
-    quint32 nextMask() noexcept override {
-        // Anti-pattern §12.12: never qrand()/rand()/timestamp-seed.
-        // QRandomGenerator::system() reads from /dev/urandom on Linux,
-        // BCryptGenRandom on Windows, SecRandomCopyBytes on macOS.
-        quint32 value = QRandomGenerator::system()->generate();
-        // RFC 6455: a mask of zero has special meaning; reroll.
-        while (Q_UNLIKELY(value == 0)) {
-            value = QRandomGenerator::system()->generate();
-        }
-        return value;
-    }
-};
+	QString req = QString("GET %1 HTTP/1.1\r\n"
+						  "Host: %2\r\n"
+						  "Upgrade: websocket\r\n"
+						  "Connection: Upgrade\r\n"
+						  "Sec-WebSocket-Key: %3\r\n"
+						  "Sec-WebSocket-Version: 13\r\n\r\n")
+				  .arg(_path, _host, key);
+	_tls->write(req.toUtf8());
+}
 
-QObject *makeCsprngMaskGenerator(QObject *parent) {
-    return new CsprngMaskGenerator(parent);
+qint64 MiniWebSocket::sendBinaryMessage(const QByteArray &msg) {
+	if (!_upgraded) return -1;
+	
+	QByteArray frame;
+	frame.append(static_cast<char>(0x82)); // FIN + Binary
+	
+	int len = msg.size();
+	if (len < 126) {
+		frame.append(static_cast<char>(0x80 | len));
+	} else if (len <= 65535) {
+		frame.append(static_cast<char>(0x80 | 126));
+		frame.append(static_cast<char>((len >> 8) & 0xFF));
+		frame.append(static_cast<char>(len & 0xFF));
+	} else {
+		frame.append(static_cast<char>(0x80 | 127));
+		for (int i = 7; i >= 0; --i) {
+			frame.append(static_cast<char>((static_cast<quint64>(len) >> (i * 8)) & 0xFF));
+		}
+	}
+	
+	quint32 mask = QRandomGenerator::system()->generate();
+	while (mask == 0) mask = QRandomGenerator::system()->generate();
+	frame.append(reinterpret_cast<const char*>(&mask), 4);
+	
+	QByteArray maskedMsg = msg;
+	const char *maskPtr = reinterpret_cast<const char*>(&mask);
+	for (int i = 0; i < len; ++i) {
+		maskedMsg[i] = maskedMsg[i] ^ maskPtr[i % 4];
+	}
+	frame.append(maskedMsg);
+	
+	return _tls->write(frame);
+}
+
+QAbstractSocket::SocketState MiniWebSocket::state() const {
+	return _upgraded ? QAbstractSocket::ConnectedState : _tls->state();
+}
+
+void MiniWebSocket::onReadyRead() {
+	_buffer.append(_tls->readAll());
+	
+	if (!_upgraded) {
+		int headerEnd = _buffer.indexOf("\r\n\r\n");
+		if (headerEnd == -1) return;
+		
+		QByteArray header = _buffer.left(headerEnd);
+		_buffer.remove(0, headerEnd + 4);
+		
+		if (header.startsWith("HTTP/1.1 101")) {
+			_upgraded = true;
+			Q_EMIT connected();
+		} else {
+			Q_EMIT errorOccurred(1);
+			_tls->disconnectFromHost();
+			return;
+		}
+	}
+	
+	while (_buffer.size() >= 2) {
+		const char *data = _buffer.constData();
+		uint8_t b0 = data[0];
+		uint8_t b1 = data[1];
+		
+		bool fin = (b0 & 0x80) != 0;
+		int opcode = b0 & 0x0F;
+		bool masked = (b1 & 0x80) != 0;
+		quint64 payloadLen = b1 & 0x7F;
+		
+		int headerLen = 2;
+		if (payloadLen == 126) {
+			if (_buffer.size() < 4) return;
+			payloadLen = (static_cast<uint8_t>(data[2]) << 8) | static_cast<uint8_t>(data[3]);
+			headerLen += 2;
+		} else if (payloadLen == 127) {
+			if (_buffer.size() < 10) return;
+			payloadLen = 0;
+			for (int i = 0; i < 8; ++i) {
+				payloadLen = (payloadLen << 8) | static_cast<uint8_t>(data[2 + i]);
+			}
+			headerLen += 8;
+		}
+		
+		int maskLen = masked ? 4 : 0;
+		if (static_cast<quint64>(_buffer.size()) < headerLen + maskLen + payloadLen) return;
+		
+		const char *maskKey = data + headerLen;
+		const char *payloadData = data + headerLen + maskLen;
+		QByteArray payload(payloadData, payloadLen);
+		
+		if (masked) {
+			for (quint64 i = 0; i < payloadLen; ++i) {
+				payload[i] = payload[i] ^ maskKey[i % 4];
+			}
+		}
+		
+		_buffer.remove(0, headerLen + maskLen + payloadLen);
+		
+		if (opcode == 0x02 || opcode == 0x01) { // binary or text
+			Q_EMIT binaryMessageReceived(payload);
+		} else if (opcode == 0x08) { // close
+			_tls->disconnectFromHost();
+		}
+	}
 }
 
 }  // namespace Tdesktop::Teleproto3
