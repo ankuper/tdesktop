@@ -40,7 +40,8 @@ constexpr auto kTransportName = "Type3/WS";
 // NFR25 backoff cap is 60 s per story 1.3 §7.2.
 constexpr int kNfr25CapMs = 60000;
 
-// Default inner silent-close delay when t3_silent_close_delay_sample_ns returns T3_ERR_RNG.
+// Default inner silent-close delay when t3_silent_close_delay_sample_ns returns
+// non-T3_OK (e.g., T3_ERR_INVALID_ARG when callbacks not yet bound, or T3_ERR_RNG).
 // Median of the AR-C2 [50, 200] ms uniform range (story 2.6 Dev Notes §NFR25-backoff-layering).
 constexpr uint64_t kSilentCloseDelayDefaultNs = 125'000'000ULL; // 125 ms
 
@@ -296,12 +297,7 @@ void ConnectionTeleproto3::onWsConnected() {
 	_bridgeCtx = Tdesktop::Teleproto3::createContext(_tls, _ws);
 	if (!_bridgeCtx) {
 		logError(u"t3 createContext failed"_q);
-		t3_session_free(_t3session);
-		_t3session = nullptr;
-		_ws->deleteLater();
-		_ws = nullptr;
-		_tls->deleteLater();
-		_tls = nullptr;
+		teardownSession();
 		_status = Status::Finished;
 		Q_EMIT error(kErrorCodeOther);
 		return;
@@ -310,15 +306,7 @@ void ConnectionTeleproto3::onWsConnected() {
 	const auto bindRc = t3_session_bind_callbacks(_t3session, &_callbacks);
 	if (bindRc != T3_OK) {
 		logError(u"t3_session_bind_callbacks: "_q + QString::fromUtf8(t3_strerror(bindRc)));
-		t3_session_free(_t3session);
-		_t3session = nullptr;
-		Tdesktop::Teleproto3::destroyContext(_bridgeCtx);
-		_bridgeCtx = nullptr;
-		_callbacks = {};
-		_ws->deleteLater();
-		_ws = nullptr;
-		_tls->deleteLater();
-		_tls = nullptr;
+		teardownSession();
 		_status = Status::Finished;
 		Q_EMIT error(kErrorCodeOther);
 		return;
@@ -487,7 +475,8 @@ void ConnectionTeleproto3::onWsBinaryMessage(const QByteArray &data) {
 	// code sent by the server (encrypted in-stream, decoded here). Emit [T3-disco]
 	// and reconnect rather than silently dropping the frame.
 	if (decrypted.size() == 4) {
-		const auto code = *reinterpret_cast<const int32_t*>(decrypted.data());
+		int32_t code = 0;
+		std::memcpy(&code, decrypted.data(), sizeof(code));
 		if (code < 0) {
 			const auto tierStr = [this]() -> QString {
 				if (!_t3session) return u"-"_q;
@@ -502,6 +491,8 @@ void ConnectionTeleproto3::onWsBinaryMessage(const QByteArray &data) {
 			emitDiscoMarker(u"Ready"_q, u"-"_q, QString::number(code), tierStr);
 			teardownSession();
 			Q_EMIT error(kErrorCodeOther);
+		} else {
+			LOG(("[T3] unexpected 4-byte frame, code=%1 (not transport error)").arg(code));
 		}
 		return;
 	}
@@ -538,8 +529,9 @@ void ConnectionTeleproto3::onWsDisconnected() {
 		reconnectDelayMs = computeReconnectDelayMs();  // samples inner + outer delay before teardown
 
 		// [T3-disco] marker — WS closed on Ready session (server-initiated close or reset).
-		// ws_close=1000 is the standard normal-closure code; MiniWebSocket does not surface
-		// the actual close frame code, so we use 1000 as the canonical "clean WS close" value.
+		// ws_close=1006 is RFC 6455's reserved "abnormal closure" code (never transmitted on
+		// the wire). MiniWebSocket does not surface the actual close frame code; 1006 honestly
+		// signals "WS layer closed without a code we can read" rather than falsely claiming 1000.
 		const auto tierStr = [&]() -> QString {
 			switch (tier) {
 			case T3_RETRY_OK:    return u"0"_q;
@@ -549,7 +541,7 @@ void ConnectionTeleproto3::onWsDisconnected() {
 			default:             return u"-"_q;
 			}
 		}();
-		emitDiscoMarker(u"Ready"_q, u"1000"_q, u"-"_q, tierStr);
+		emitDiscoMarker(u"Ready"_q, u"1006"_q, u"-"_q, tierStr);
 	} else {
 		// [T3-disco] marker — WS disconnected before Ready (Connecting or Negotiating).
 		const auto stateStr = (_status == Status::Negotiating)
@@ -583,8 +575,11 @@ void ConnectionTeleproto3::onWsDisconnected() {
 }
 
 void ConnectionTeleproto3::onWsError(int err) {
+	if (_status == Status::Finished || _status == Status::Waiting) return;
 	logError(u"WS socket error: "_q + QString::number(err));
-	// [T3-disco] marker — WS error carries the socket error code in ws_close.
+	// [T3-disco] marker — `err:<N>` prefix typifies this slot's value as a Qt socket-error
+	// code (QAbstractSocket::SocketError range), distinct from RFC 6455 WS close codes
+	// emitted from onWsDisconnected. Operators grep `ws_close=err:` vs `ws_close=[0-9]`.
 	const auto stateStr = [this]() -> QString {
 		switch (_status) {
 		case Status::Connecting:  return u"Connecting"_q;
@@ -603,7 +598,7 @@ void ConnectionTeleproto3::onWsError(int err) {
 		default:             return u"-"_q;
 		}
 	}();
-	emitDiscoMarker(stateStr, QString::number(err), u"-"_q, tierStr);
+	emitDiscoMarker(stateStr, u"err:"_q + QString::number(err), u"-"_q, tierStr);
 	teardownSession();
 	Q_EMIT error(kErrorCodeOther);
 }
@@ -705,6 +700,9 @@ void ConnectionTeleproto3::teardownSession() {
 	// _tier3ToastVisible intentionally NOT cleared here — persistent across teardown.
 	// Only userRetry() clears it (D2 resolution: toast fires once per user-retry cycle).
 
+	// Zero callbacks first: defangs any callback re-entry into freed session/bridge ctx
+	// before the lib has a chance to invoke them during cleanup. Order matters.
+	_callbacks = {};
 	if (_t3session) {
 		t3_session_free(_t3session);
 		_t3session = nullptr;
@@ -712,7 +710,6 @@ void ConnectionTeleproto3::teardownSession() {
 	if (_bridgeCtx) {
 		Tdesktop::Teleproto3::destroyContext(_bridgeCtx);
 		_bridgeCtx = nullptr;
-		_callbacks = {};
 	}
 	if (_ws) {
 		_ws->disconnect(); // Qt disconnect all signals
