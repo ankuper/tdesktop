@@ -13,12 +13,13 @@
 
 #include "mtproto/teleproto3_bridge.h"
 
-// ABI version-pin: updated to lib-v0.1.1 by Story 1a-1 (Epic 2 style-guide §3).
-// lib-v0.1.1 is additive (T3_CMD_BENCH enum + parser change); no Epic 2 code path changed.
+// ABI version-pin: updated to lib-v0.1.2 by Story 9-1 (Epic 9 calls integration).
+// lib-v0.1.2 is additive (T3_SHIM_SOCKS5 optional API + t3_features.h); no existing
+// symbol changed. ABI bump §A checklist run 2026-05-10; two consumer pins updated.
 static_assert(T3_ABI_VERSION_MAJOR == 0 &&
               T3_ABI_VERSION_MINOR == 1 &&
-              T3_ABI_VERSION_PATCH == 1,
-              "Bridge expects lib-v0.1.1; rebuild lib or update macros");
+              T3_ABI_VERSION_PATCH == 2,
+              "Bridge expects lib-v0.1.2; rebuild lib or update macros");
 
 #include <QtNetwork/QAbstractSocket>
 #include <QCoreApplication>
@@ -433,5 +434,61 @@ void MiniWebSocket::onReadyRead() {
 		}
 	}
 }
+
+#if TDESKTOP_TYPE3_CALLS
+// ── Story 9-1: SOCKS5/CONNECT shim wrappers ────────────────────────────────
+#include "t3_shim_socks5.h"
+#include "logs.h"
+
+struct ShimHandle { t3_shim_t *inner = nullptr; };
+
+ShimHandle *ShimOpen(
+    const std::string &serverHost,
+    uint16_t           serverPort,
+    const std::string &wsPath,
+    const std::string &secretHex,
+    uint16_t           localPortHint)
+{
+    // P13: refuse embedded NUL bytes in any std::string passed to a C-string
+    // consumer — t3_shim_open uses strlen() / strcpy-style ingestion and would
+    // silently truncate at the first '\0', producing a mismatched server_host
+    // or secret that the user never authored. Treat as parse failure.
+    auto hasNul = [](const std::string &s) {
+        return s.find('\0') != std::string::npos;
+    };
+    if (hasNul(serverHost) || hasNul(wsPath) || hasNul(secretHex)) {
+        LOG(("[T3-shim] ShimOpen rejected: embedded NUL in serverHost/wsPath/secretHex"));
+        return nullptr;
+    }
+
+    t3_shim_t *raw = nullptr;
+    t3_result_t rc = t3_shim_open(
+        serverHost.c_str(),
+        serverPort,
+        wsPath.c_str(),
+        secretHex.c_str(),
+        localPortHint,
+        &raw);
+    if (rc != T3_OK) {
+        LOG(("[T3-shim] t3_shim_open failed: rc=%d", (int)rc));
+        return nullptr;
+    }
+    auto *h = new ShimHandle{raw};
+    LOG(("[T3-dogfood] SOCKS5 shim opened on port %u → %s:%u%s",
+         (unsigned)t3_shim_local_port(raw),
+         serverHost.c_str(), (unsigned)serverPort, wsPath.c_str()));
+    return h;
+}
+
+void ShimClose(ShimHandle *h) {
+    if (!h) return;
+    t3_shim_close(h->inner);
+    delete h;
+}
+
+uint16_t ShimLocalPort(const ShimHandle *h) {
+    return h ? t3_shim_local_port(h->inner) : 0;
+}
+#endif // TDESKTOP_TYPE3_CALLS
 
 }  // namespace Tdesktop::Teleproto3
