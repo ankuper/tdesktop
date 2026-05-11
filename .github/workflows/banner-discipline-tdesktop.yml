@@ -1,0 +1,70 @@
+# Story 2-7 §6 — banner-discipline (local equivalent of Epic 1 CI).
+#
+# Greps the verbatim Epic 2 §1 Operational-contract banner at line 2
+# (after the YAML frontmatter) of the new Story 2-7 docs. Byte-exact —
+# emoji, em-dashes, or word substitutions fail the lint.
+#
+# Note (Story 2-7 §B Spec-Edit divergence #9): Epic 1's
+# `banner-discipline.yml` lives in the MTProxy/teleproto3 repo. This
+# file is the tdesktop-fork-local equivalent that asserts the same
+# contract on tdesktop docs without modifying the upstream Epic 1 CI.
+# Cross-repo extension is out of scope per Epic 2 §13/§14.
+#
+# Permissions: contents: read (Epic 1 §13).
+
+name: banner-discipline (tdesktop)
+
+on:
+  push:
+    paths:
+      - 'docs/updates-linux.md'
+      - 'docs/a11y-audit-linux.md'
+      - '.github/workflows/banner-discipline-tdesktop.yml'
+  pull_request:
+    paths:
+      - 'docs/updates-linux.md'
+      - 'docs/a11y-audit-linux.md'
+      - '.github/workflows/banner-discipline-tdesktop.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  banner:
+    name: assert Operational-contract banner
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify banner at frontmatter+1 of each new doc
+        run: |
+          set -euo pipefail
+          banner='> **Operational contract.**'
+          fail=0
+          for doc in docs/updates-linux.md docs/a11y-audit-linux.md; do
+            if [ ! -f "$doc" ]; then
+              echo "FAIL: $doc missing"
+              fail=$((fail + 1))
+              continue
+            fi
+            # Skip the YAML frontmatter and the blank line after it.
+            awk '
+              BEGIN { in_fm = 0; saw_close = 0 }
+              NR == 1 && $0 == "---" { in_fm = 1; next }
+              in_fm && $0 == "---" { in_fm = 0; saw_close = 1; next }
+              in_fm { next }
+              saw_close && $0 == "" { next }
+              { print; exit }
+            ' "$doc" > /tmp/first-line
+            actual="$(cat /tmp/first-line)"
+            if ! grep -qF "$banner" /tmp/first-line; then
+              echo "FAIL: $doc — banner mismatch"
+              echo "       expected start: $banner"
+              echo "       actual line   : $actual"
+              fail=$((fail + 1))
+            fi
+          done
+          if [ "$fail" -gt 0 ]; then
+            exit 1
+          fi
+          echo OK
