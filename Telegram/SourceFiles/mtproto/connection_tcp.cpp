@@ -514,10 +514,16 @@ void TcpConnection::connectToServer(
 	Expects(_protocol == nullptr);
 	Expects(_protocolDcId == 0);
 
-	const auto secret = (_proxy.type == ProxyData::Type::Mtproto)
-		? _proxy.secretFromMtprotoPassword()
+	// [W2] Type::Mtproto3 connections reach ConnectionTeleproto3 via AbstractConnection::Create;
+	// the guard here is defence-in-depth in case TcpConnection is used as fallback.
+	const auto isMtprotoProxy = (_proxy.type == ProxyData::Type::Mtproto
+		|| _proxy.type == ProxyData::Type::Mtproto3);
+	const auto secret = isMtprotoProxy
+		? (_proxy.type == ProxyData::Type::Mtproto3
+			? _proxy.secretFromType3Password()
+			: _proxy.secretFromMtprotoPassword())
 		: protocolSecret;
-	if (_proxy.type == ProxyData::Type::Mtproto) {
+	if (isMtprotoProxy) {
 		_address = _proxy.host;
 		_port = _proxy.port;
 		_protocol = Protocol::Create(secret);
@@ -538,7 +544,7 @@ void TcpConnection::connectToServer(
 		.arg(_debugId.toInt())
 		.arg(
 			ProtocolDcDebugId(_protocolDcId),
-			(_proxy.type == ProxyData::Type::Mtproto) ? "mtproxy " : "",
+			isMtprotoProxy ? "mtproxy " : "",
 			_address)
 		.arg(_port)
 		.arg(postfix.isEmpty() ? _protocol->debugPostfix() : postfix);

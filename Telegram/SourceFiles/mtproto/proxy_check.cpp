@@ -74,8 +74,11 @@ void StartProxyCheck(
 		raw->connect(raw, &Connection::disconnected, failed);
 		raw->connect(raw, &Connection::error, failed);
 	};
-	if (proxy.type == ProxyData::Type::Mtproto) {
-		const auto secret = proxy.secretFromMtprotoPassword();
+	if (proxy.type == ProxyData::Type::Mtproto // Story 2-13a: Mtproto3 routing parity — proxy-checker also routes via proxy config, not dcOptions().lookup().
+		|| proxy.type == ProxyData::Type::Mtproto3) {
+		const auto secret = (proxy.type == ProxyData::Type::Mtproto3)
+			? proxy.secretFromType3Password()
+			: proxy.secretFromMtprotoPassword();
 		setup(v4, secret);
 		v4->connectToServer(
 			proxy.host,
