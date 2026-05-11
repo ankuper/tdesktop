@@ -1,0 +1,27 @@
+# Story 2-7 AC#5 — WCAG 2.1 AA audit baseline (Linux).
+#
+# Aggregate-only per Epic 2 style-guide §9. No per-event raw data.
+# Refreshed on each release-tag PR by .github/workflows/a11y-audit-linux.yml.
+#
+# Schema is invariant; field-set drift requires an explicit Spec-edit
+# amendment to docs/a11y-audit-linux.md before merge.
+
+wcag_total_checks: 0
+wcag_violations: 0
+wcag_exempted_with_justification: 0
+tool_name: pa11y
+tool_version: pending-first-run
+audit_date: 2026-05-09
+locale_set:
+  - en-US
+  - fa-IR
+reduced_motion_set:
+  - off
+  - on
+notes: >
+  v0.1.0 dev-build placeholder. Story 2-7 ships the audit harness +
+  baseline schema + CI gate; the first concrete audit run replaces
+  these zeros with real measurements. Until then the gate is
+  vacuously green (0 - 0 > 0 → false). On the first audit run that
+  reports any violations, exemptions are catalogued in
+  docs/a11y-audit-linux.md §6 and the gate becomes load-bearing.
