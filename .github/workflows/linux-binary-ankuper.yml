@@ -1,0 +1,145 @@
+name: Linux binary (ankuper)
+
+# Manual-dispatch workflow that produces a Release-mode Telegram ELF binary
+# suitable for ad-hoc runtime testing (e.g. TSPU-bypass validation through
+# the Type3 proxy on an Ivy Bridge .lnx host where local builds fail at
+# gcc-toolset-15 cc1plus due to missing AVX2/BMI2/FMA instructions).
+#
+# Distinct from upstream linux.yml (which builds a Debug binary with
+# TDESKTOP_API_TEST=ON) and from appimage-reproducible.yml (which packages
+# a release AppImage). This workflow just emits raw `Telegram` + `Updater`
+# ELFs as artifacts.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_TAG: tdesktop:centos_env
+
+jobs:
+  build:
+    name: Rocky Linux 8 (Release)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Clone tdesktop.
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Clone teleproto3 sibling.
+        # Story 2-7 / Telegram/CMakeLists.txt:86-106 requires the
+        # teleproto3 source tree at ${CMAKE_SOURCE_DIR}/../../teleproto3
+        # (i.e. as a workspace sibling of tdesktop). actions/checkout
+        # cannot place files outside GITHUB_WORKSPACE; use git clone.
+        run: |
+          git clone --depth=1 https://github.com/ankuper/teleproto3.git ../teleproto3
+          ls -la ../teleproto3/lib/include
+
+      - name: First set up.
+        run: |
+          sudo apt update
+          curl -sSL https://install.python-poetry.org | python3 -
+          cd Telegram/build/docker/centos_env
+          poetry install
+          DOCKERFILE=$(DEBUG= LTO= poetry run gen_dockerfile)
+          echo "$DOCKERFILE" > Dockerfile
+          rm -rf __pycache__
+
+      - name: Free up some disk space.
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
+        with:
+          tool-cache: true
+
+      - name: Set up Docker Buildx.
+        uses: docker/setup-buildx-action@v4
+
+      - name: Libraries cache.
+        # Shares the buildx cache with linux.yml so we don't rebuild
+        # the centos_env Docker image from scratch when it's warm.
+        uses: actions/cache@v5
+        with:
+          path: ${{ runner.temp }}/.buildx-cache
+          key: ${{ runner.OS }}-libs-${{ hashFiles('Telegram/build/docker/centos_env/**') }}
+          restore-keys: ${{ runner.OS }}-libs-
+
+      - name: Libraries.
+        uses: docker/build-push-action@v7
+        with:
+          context: Telegram/build/docker/centos_env
+          load: true
+          tags: ${{ env.IMAGE_TAG }}
+          cache-from: type=local,src=${{ runner.temp }}/.buildx-cache
+          cache-to: type=local,dest=${{ runner.temp }}/.buildx-cache-new,mode=max
+
+      - name: Move cache.
+        run: |
+          rm -rf ${{ runner.temp }}/.buildx-cache
+          mv ${{ runner.temp }}/.buildx-cache{-new,}
+
+      - name: Build libteleproto3.a (Linux reference toolchain).
+        run: |
+          docker run --rm \
+            -u $(id -u) \
+            -v $(realpath ..)/teleproto3:/usr/src/teleproto3 \
+            -w /usr/src/teleproto3 \
+            $IMAGE_TAG \
+            bash -c "
+              cmake -S lib -B lib/build \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DT3_CSPRNG_BACKEND=linux \
+                -DT3_BUILD_TESTS=OFF && \
+              cmake --build lib/build --config Release
+            "
+          ls -la ../teleproto3/lib/build/libteleproto3.a
+
+      - name: Telegram Desktop build (Release).
+        env:
+          TDESKTOP_API_ID: ${{ secrets.TDESKTOP_API_ID }}
+          TDESKTOP_API_HASH: ${{ secrets.TDESKTOP_API_HASH }}
+        run: |
+          if [ -z "$TDESKTOP_API_ID" ] || [ -z "$TDESKTOP_API_HASH" ]; then
+            echo "FAIL: TDESKTOP_API_ID / TDESKTOP_API_HASH secrets are not set on the repo."
+            exit 1
+          fi
+          docker run --rm \
+            -u $(id -u) \
+            -v $PWD:/usr/src/tdesktop \
+            -v $(realpath ..)/teleproto3:/usr/src/teleproto3 \
+            -e CONFIG=Release \
+            -e TDESKTOP_API_ID -e TDESKTOP_API_HASH \
+            $IMAGE_TAG \
+            /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
+            -D CMAKE_BUILD_TYPE=Release \
+            -D TDESKTOP_API_ID=$TDESKTOP_API_ID \
+            -D TDESKTOP_API_HASH=$TDESKTOP_API_HASH \
+            -D TDESKTOP_LAUNCHER_BASENAME=org.ankuper.tdesktop \
+            -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON \
+            -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON
+
+      - name: Check output.
+        run: |
+          filePath="out/Release/Telegram"
+          if [ ! -f "$filePath" ]; then
+            echo "FAIL: Telegram binary missing at $filePath"
+            find out -maxdepth 3 -type f -name 'Telegram' -o -name 'Updater' 2>/dev/null | head
+            exit 1
+          fi
+          ls -la out/Release/Telegram out/Release/Updater 2>&1 | head -5
+          file out/Release/Telegram | head -1
+
+      - name: Stage artifact.
+        run: |
+          mkdir -p out/Release/artifact
+          cp out/Release/Telegram out/Release/Updater out/Release/artifact/
+          sha256sum out/Release/artifact/* | tee out/Release/artifact/SHA256SUMS
+
+      - name: Upload artifact.
+        uses: actions/upload-artifact@v4
+        with:
+          name: Telegram-linux-x86_64-release
+          path: out/Release/artifact/
+          if-no-files-found: error
