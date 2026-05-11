@@ -1219,11 +1219,22 @@ void Call::createAndStartController(const MTPDphoneCall &call) {
 						finish(FinishType::Failed);
 						return;
 					}
+					// D6: retrieve the auto-generated SOCKS5 USER/PASS the shim now
+					// enforces on its loopback listener (Story 9-1). Without these,
+					// tgcalls's SOCKS5 NO-AUTH greet would be refused.
+					std::string shimUser, shimPass;
+					if (!Tdesktop::Teleproto3::ShimCredentials(
+							_t3ShimHandle.get(), shimUser, shimPass)) {
+						LOG(("Call Error: Type3 shim credentials unavailable; aborting call"));
+						_t3ShimHandle.reset();
+						finish(FinishType::Failed);
+						return;
+					}
 					descriptor.proxy = std::make_unique<tgcalls::Proxy>();
 					descriptor.proxy->host = "127.0.0.1";
 					descriptor.proxy->port = shimPort;
-					descriptor.proxy->login = "";
-					descriptor.proxy->password = "";
+					descriptor.proxy->login = std::move(shimUser);
+					descriptor.proxy->password = std::move(shimPass);
 					// P12: required for the SOCKS5-proxied call path; tgcalls defaults
 					// allowTCP=false which makes Descriptor::proxy=SOCKS5 disable UDP
 					// candidates AND silently skip TCP-flagged reflectors.

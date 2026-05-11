@@ -489,6 +489,24 @@ void ShimClose(ShimHandle *h) {
 uint16_t ShimLocalPort(const ShimHandle *h) {
     return h ? t3_shim_local_port(h->inner) : 0;
 }
+
+bool ShimCredentials(const ShimHandle *h, std::string &outUser, std::string &outPass) {
+    if (!h) return false;
+    char user_buf[T3_SHIM_CRED_BUFLEN] = {0};
+    char pass_buf[T3_SHIM_CRED_BUFLEN] = {0};
+    t3_result_t rc = t3_shim_get_credentials(
+        h->inner,
+        user_buf, sizeof(user_buf),
+        pass_buf, sizeof(pass_buf));
+    if (rc != T3_OK) {
+        // Intentionally NOT logging credential values — only the failure mode.
+        LOG(("[T3-shim] t3_shim_get_credentials failed: rc=%d", (int)rc));
+        return false;
+    }
+    outUser.assign(user_buf);
+    outPass.assign(pass_buf);
+    return true;
+}
 #endif // TDESKTOP_TYPE3_CALLS
 
 }  // namespace Tdesktop::Teleproto3

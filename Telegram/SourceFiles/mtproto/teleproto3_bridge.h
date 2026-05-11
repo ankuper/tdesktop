@@ -115,6 +115,15 @@ void ShimClose(ShimHandle *handle);
 
 // Return the localhost port the shim is bound to.  Returns 0 if handle is nullptr.
 [[nodiscard]] uint16_t ShimLocalPort(const ShimHandle *handle);
+
+// Story 9-1 D6: retrieve the auto-generated SOCKS5 USER/PASS that the shim
+// requires on its loopback listener. Both strings are 32 lower-case hex
+// chars (no NUL); they MUST NOT be logged or persisted. Returns false if
+// handle is nullptr or the library getter fails.
+[[nodiscard]] bool ShimCredentials(
+    const ShimHandle *handle,
+    std::string &outUser,
+    std::string &outPass);
 #endif // TDESKTOP_TYPE3_CALLS
 
 }  // namespace Tdesktop::Teleproto3
