@@ -39,6 +39,21 @@ class VideoTrack;
 struct DeviceResolvedId;
 } // namespace Webrtc
 
+#if TDESKTOP_TYPE3_CALLS
+namespace Tdesktop::Teleproto3 {
+struct ShimHandle;
+void ShimClose(ShimHandle *handle);  // matches teleproto3_bridge.h decl
+
+// P6: RAII wrapper so a missed destroyController() / re-entry / early-exit
+// cannot leak the shim or trigger a double-close UAF. The deleter no-ops on
+// null pointers, which lets us call reset() freely on the unique_ptr.
+struct ShimHandleDeleter {
+	void operator()(ShimHandle *p) const noexcept { if (p) ShimClose(p); }
+};
+using UniqueShimHandle = std::unique_ptr<ShimHandle, ShimHandleDeleter>;
+} // namespace Tdesktop::Teleproto3
+#endif // TDESKTOP_TYPE3_CALLS
+
 namespace Calls {
 
 struct StartConferenceInfo;
@@ -369,6 +384,9 @@ private:
 	std::vector<not_null<PeerData*>> _conferenceParticipants;
 
 	std::unique_ptr<tgcalls::Instance> _instance;
+#if TDESKTOP_TYPE3_CALLS
+	Tdesktop::Teleproto3::UniqueShimHandle _t3ShimHandle; // Story 9-1 (P6: RAII)
+#endif
 	std::shared_ptr<tgcalls::VideoCaptureInterface> _videoCapture;
 	QString _videoCaptureDeviceId;
 	bool _videoCaptureIsScreencast = false;

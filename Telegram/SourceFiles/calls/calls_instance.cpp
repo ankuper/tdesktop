@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_item.h"
 #include "mtproto/mtproto_dh_utils.h"
+#include "mtproto/mtproto_proxy_data.h"
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "main/session/session_show.h"
@@ -216,10 +217,44 @@ void Instance::startOutgoingCall(
 	}), args.video);
 }
 
+#if defined(TDESKTOP_TYPE3_CALLS) && TDESKTOP_TYPE3_CALLS
+// P3 (audit): every group/conference-call entry path in the codebase routes
+// through Instance::startOrJoinGroupCall or Instance::startOrJoinConferenceCall
+// (verified via grep against SourceFiles/{calls,window,history,dialogs}). The
+// notification "Join Group Call" action does not contain its own start path —
+// it dispatches through these two methods, both of which are guarded below.
+// P6/P7: keep this in a single non-inline helper so the enum reference catches
+// an Mtproto3 rename at compile time on every build that includes this TU.
+static bool BlockedByMtproto3Proxy() {
+	(void)MTP::ProxyData::Type::Mtproto3;  // P7: rename guard
+	const auto &proxy = Core::App().settings().proxy();
+	const auto &selected = proxy.selected();
+	// P4: respect useProxyForCalls() — if the user disabled "use proxy for calls",
+	// the call uses direct connections and our group-call guard would be a false positive.
+	// P5: also require selected().valid() so an in-progress proxy edit (isEnabled=true
+	//     but selected={}) does not fail open.
+	return proxy.isEnabled()
+		&& proxy.useProxyForCalls()
+		&& selected.valid()
+		&& !selected.host.isEmpty()
+		&& selected.type == MTP::ProxyData::Type::Mtproto3;
+}
+#endif // TDESKTOP_TYPE3_CALLS
+
 void Instance::startOrJoinGroupCall(
 		std::shared_ptr<Ui::Show> show,
 		not_null<PeerData*> peer,
 		StartGroupCallArgs args) {
+#if defined(TDESKTOP_TYPE3_CALLS) && TDESKTOP_TYPE3_CALLS
+	// Story 9-1 AC#5: P2 — intercept BEFORE confirmLeaveCurrent so the user does
+	// NOT have to dismiss an active 1:1 call before learning that group calls are
+	// unsupported under the Mtproto3 proxy. Active call survives.
+	if (BlockedByMtproto3Proxy()) {
+		LOG(("Calls: blocked group-call start under Mtproto3 proxy"));  // P8
+		if (show) show->showToast(t3lang::lng_t3_group_calls_unsupported());  // P9
+		return;
+	}
+#endif
 	confirmLeaveCurrent(show, peer, args, [=](StartGroupCallArgs args) {
 		using JoinConfirm = Calls::StartGroupCallArgs::JoinConfirm;
 		const auto context = (args.confirm == JoinConfirm::Always)
@@ -244,6 +279,19 @@ void Instance::startOrJoinGroupCall(
 
 void Instance::startOrJoinConferenceCall(StartConferenceInfo args) {
 	Expects(args.call || args.show);
+
+#if defined(TDESKTOP_TYPE3_CALLS) && TDESKTOP_TYPE3_CALLS
+	// Story 9-1 AC#5: P1 — same Mtproto3 short-circuit as startOrJoinGroupCall.
+	// Conference path bypasses startOrJoinGroupCall entirely (push-invite + direct
+	// link join), so without this guard the CBR-class UDP signature still leaks.
+	if (BlockedByMtproto3Proxy()) {
+		LOG(("Calls: blocked conference-call start under Mtproto3 proxy"));
+		if (args.show) {
+			args.show->showToast(t3lang::lng_t3_group_calls_unsupported());
+		}
+		return;
+	}
+#endif
 
 	const auto migrationInfo = (args.migrating
 		&& args.call

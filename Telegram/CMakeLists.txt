@@ -21,6 +21,29 @@ add_subdirectory(lib_webrtc)
 add_subdirectory(lib_webview)
 add_subdirectory(codegen)
 
+# ── Story 2.6: Type3 UI-string codegen ───────────────────────────────────────
+# Reads teleproto3/spec/ux-strings.yaml and patches the <type3-strings:begin/>
+# sentinel block in lang_keys.h.  Runs only when ux-strings.yaml changes.
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+set(_t3_yaml  "${CMAKE_SOURCE_DIR}/../../teleproto3/spec/ux-strings.yaml")
+set(_t3_hdr   "${CMAKE_CURRENT_SOURCE_DIR}/SourceFiles/lang/lang_keys.h")
+set(_t3_stamp "${CMAKE_CURRENT_BINARY_DIR}/lang_keys_t3.stamp")
+add_custom_command(
+    OUTPUT  "${_t3_stamp}"
+    COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/build/codegen-t3-strings.py"
+            --in    "${_t3_yaml}"
+            --out   "${_t3_hdr}"
+            --stamp "${_t3_stamp}"
+    DEPENDS "${_t3_yaml}"
+    COMMENT "Codegen Type3 strings into lang_keys.h"
+    VERBATIM
+)
+add_custom_target(lang_keys_t3 ALL DEPENDS "${_t3_stamp}")
+# Telegram target must wait for codegen before compiling any TU that includes lang_keys.h.
+add_dependencies(Telegram lang_keys_t3)
+# ─────────────────────────────────────────────────────────────────────────────
+
 get_filename_component(src_loc SourceFiles REALPATH)
 get_filename_component(res_loc Resources REALPATH)
 
@@ -64,7 +87,16 @@ set(LIBTELEPROTO3_ROOT
     "${CMAKE_SOURCE_DIR}/../../teleproto3"
     CACHE PATH "Root of the libteleproto3 source tree"
 )
-set(LIBTELEPROTO3_LIB_PATH "${LIBTELEPROTO3_ROOT}/lib/build/libteleproto3.a")
+# Story 2-9 (macOS dev-build): LIBTELEPROTO3_LIB_PATH can be overridden to point
+# at the macOS cmake-build output (cmake-build/libteleproto3.a) instead of the
+# Linux Makefile build output (build/libteleproto3.a).  Override via:
+#   -DLIBTELEPROTO3_LIB_PATH=/path/to/teleproto3/lib/cmake-build/libteleproto3.a
+if(NOT LIBTELEPROTO3_LIB_PATH)
+    set(LIBTELEPROTO3_LIB_PATH
+        "${LIBTELEPROTO3_ROOT}/lib/build/libteleproto3.a"
+        CACHE PATH "Path to libteleproto3.a (overridable for macOS cmake-build output)"
+    )
+endif()
 set(LIBTELEPROTO3_INCLUDE_DIR "${LIBTELEPROTO3_ROOT}/lib/include")
 
 if(NOT EXISTS "${LIBTELEPROTO3_INCLUDE_DIR}/t3.h")
@@ -82,6 +114,36 @@ set_target_properties(teleproto3 PROPERTIES
     IMPORTED_LOCATION_MINSIZEREL     "${LIBTELEPROTO3_LIB_PATH}"
     INTERFACE_INCLUDE_DIRECTORIES    "${LIBTELEPROTO3_INCLUDE_DIR}"
 )
+
+# Story 2-9: Generate t3_default_proxy.gen.h from .credentials (gitignored).
+# The header lands in CMAKE_CURRENT_BINARY_DIR — never in the source tree.
+include(${CMAKE_CURRENT_SOURCE_DIR}/generate_default_proxy.cmake)
+target_include_directories(Telegram PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/gen)
+
+# Link teleproto3 to td_mtproto so that mtproto_proxy_data.cpp can find t3.h
+target_link_libraries(td_mtproto PUBLIC teleproto3)
+
+# Story 9-1: SOCKS5-over-Type3 voice calls (dogfood ≤5 users).
+# Default OFF; enable for dogfood builds: -DTDESKTOP_TYPE3_CALLS=ON
+option(TDESKTOP_TYPE3_CALLS
+    "Enable Type3 (Mtproto3) voice calls via localhost SOCKS5 shim [dogfood only, Story 9-1]"
+    OFF)
+if (TDESKTOP_TYPE3_CALLS)
+    target_compile_definitions(Telegram PRIVATE TDESKTOP_TYPE3_CALLS=1)
+    # P5: PUBLIC (not PRIVATE) so any consumer of td_mtproto (td_ui etc.)
+    # sees the same Mtproto3 view as the .cpp that defined supportsCalls();
+    # otherwise UI/call sites that inspect ProxyData::Type::Mtproto3 may
+    # silently disagree with mtproto_proxy_data.cpp's compiled answer.
+    target_compile_definitions(td_mtproto PUBLIC TDESKTOP_TYPE3_CALLS=1)
+    # P4: emit T3CallsDogfoodOnly key into Telegram.plist ONLY for dogfood builds
+    # (CMake performs @-substitution via MACOSX_BUNDLE_INFO_PLIST).
+    set(T3_CALLS_DOGFOOD_PLIST_FRAGMENT [=[<!-- Story 9-1 (calls v1 dogfood): experimental SOCKS5-over-Type3 voice call tunnel.
+	     Remove before any public distribution.  ≤5 self-test users only. -->
+	<key>T3CallsDogfoodOnly</key>
+	<string>YES</string>]=])
+else()
+    set(T3_CALLS_DOGFOOD_PLIST_FRAGMENT "")
+endif()
 
 target_link_libraries(Telegram
 PRIVATE
@@ -127,6 +189,46 @@ PRIVATE
     desktop-app::external_xxhash
     teleproto3
 )
+
+# Story 2.5 — Subtask 2.1 + 6.1: wire libteleproto3 into td_ui so
+# proxy_indicator_c1.cpp can include <t3.h> and run the _Static_assert ABI pin.
+# Also generate teleproto3_tokens.qrc from the spec tree (forward-citation:
+# story 1.4 owns the token files; empty QRC generated when absent).
+target_link_libraries(td_ui PRIVATE teleproto3)
+target_include_directories(td_ui PRIVATE "${LIBTELEPROTO3_INCLUDE_DIR}")
+
+set(_t3_token_root "${LIBTELEPROTO3_ROOT}/spec/ux-tokens")
+set(_t3_contrast_src "${LIBTELEPROTO3_ROOT}/spec/assets/contrast-tokens.yaml")
+set(_t3_qrc_out "${CMAKE_CURRENT_BINARY_DIR}/teleproto3_tokens.qrc")
+
+if(EXISTS "${_t3_token_root}")
+    file(GLOB_RECURSE _t3_color_files   "${_t3_token_root}/color/*.json")
+    file(GLOB_RECURSE _t3_motion_files  "${_t3_token_root}/motion/*.json")
+    file(GLOB_RECURSE _t3_geom_files    "${_t3_token_root}/geometry/*.svg")
+else()
+    set(_t3_color_files  "")
+    set(_t3_motion_files "")
+    set(_t3_geom_files   "")
+    message(STATUS "[C1] ux-tokens absent at ${_t3_token_root} — empty QRC; "
+        "indicator logs fatal at runtime until story 1.4 lands tokens.")
+endif()
+if(EXISTS "${_t3_contrast_src}")
+    set(_t3_contrast_files "${_t3_contrast_src}")
+else()
+    set(_t3_contrast_files "")
+endif()
+
+set(_t3_qrc_entries "")
+foreach(_f IN LISTS _t3_color_files _t3_motion_files _t3_geom_files _t3_contrast_files)
+    file(RELATIVE_PATH _rel "${LIBTELEPROTO3_ROOT}/spec" "${_f}")
+    string(APPEND _t3_qrc_entries "    <file alias=\"${_rel}\">${_f}</file>\n")
+endforeach()
+file(WRITE "${_t3_qrc_out}"
+    "<RCC>\n  <qresource prefix=\"/teleproto3\">\n"
+    "${_t3_qrc_entries}"
+    "  </qresource>\n</RCC>\n"
+)
+target_sources(td_ui PRIVATE "${_t3_qrc_out}")
 
 if (NOT DESKTOP_APP_DISABLE_SWIFT6)
     telegram_add_apple_swift_runtime(Telegram)
@@ -1472,6 +1574,8 @@ PRIVATE
     mtproto/connection_tcp.h
     mtproto/connection_teleproto3.cpp
     mtproto/connection_teleproto3.h
+    mtproto/connection_teleproto3_ui.cpp
+    mtproto/connection_teleproto3_ui.h
     mtproto/details/network_change_observer_linux.cpp
     mtproto/details/network_change_observer_mac.mm
     mtproto/details/network_change_observer_win.cpp
@@ -2028,6 +2132,16 @@ elseif (APPLE)
         target_link_libraries(Telegram PRIVATE desktop-app::external_iconv)
     endif()
 
+    # Story 2-9 (macOS dev-build) + Story 1-13:
+    # Security.framework — required by libteleproto3.a SecRandomCopyBytes CSPRNG backend.
+    # Foundation.framework — required by connection_teleproto3.cpp NSBundle DevBuildOnly self-check.
+    # Both are standard macOS system frameworks; no install required.
+    target_link_libraries(Telegram PRIVATE
+        "-framework Security"
+        "-framework Foundation"
+        "-weak_framework Network"
+    )
+
     set(icons_path ${CMAKE_CURRENT_SOURCE_DIR}/Telegram/Images.xcassets)
     if (CMAKE_GENERATOR STREQUAL Xcode)
         target_add_resource(Telegram ${icons_path})
@@ -2102,6 +2216,14 @@ elseif (APPLE)
             COMMAND cp ${CRASHPAD_HANDLER} $<TARGET_FILE_DIR:Telegram>/../Helpers/
         )
     endif()
+    # Strip local symbols post-build. Without this the debug binary's __LINKEDIT
+    # (5M+ local symbols, ~2GB string table) extends into the dyld shared cache
+    # fixed mapping region on macOS 26+, causing launch failure:
+    #   "syscall to map cache into shared region failed"
+    # strip -x removes local symbols only, shrinking the binary from ~2.5GB to ~400MB.
+    add_custom_command(TARGET Telegram POST_BUILD
+        COMMAND strip -x $<TARGET_FILE:Telegram>
+    )
 else()
     include(${cmake_helpers_loc}/external/glib/generate_dbus.cmake)
     generate_dbus(Telegram org.freedesktop.portal. XdpBackground ${third_party_loc}/xdg-desktop-portal/data/org.freedesktop.portal.Background.xml)

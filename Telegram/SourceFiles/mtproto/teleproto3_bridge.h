@@ -18,10 +18,10 @@
 #include <t3.h>
 
 #include <QByteArray>
+#include <QtNetwork/QAbstractSocket>
 #include "mtproto/secure_store.h"
 
 class QSslSocket;
-class QWebSocket;
 
 namespace Tdesktop::Teleproto3 {
 
@@ -52,7 +52,7 @@ struct BridgeContext;  // opaque; defined in teleproto3_bridge.cpp
 // Creates a BridgeContext owning references to tls and ws.
 // Uses a process-wide steady_clock epoch for monotonic_ns (shared across reconnects).
 // Caller retains ownership of tls and ws — both must outlive the context.
-BridgeContext *createContext(QSslSocket *tls, QWebSocket *ws);
+BridgeContext *createContext(QSslSocket *tls, class MiniWebSocket *ws);
 
 // Populates a t3_callbacks_t with the eight Qt-bridged function-pointers
 // and stores ctx as the round-trip opaque pointer.
@@ -61,20 +61,61 @@ t3_callbacks_t makeCallbacks(BridgeContext *ctx);
 // Destroys a context previously created with createContext.
 void destroyContext(BridgeContext *ctx);
 
-// FR23: CSPRNG-backed mask generator for QWebSocket.
-// Drives BOTH the Sec-WebSocket-Key generation (via QWebSocketPrivate::generateKey,
-// which calls maskGenerator->nextMask() x4) AND the per-frame masking. Replaces
-// Qt's QDefaultMaskGenerator which uses QRandomGenerator::global() (Qt's own
-// source comments call this "insecure").
-// Anti-pattern §12.12: qrand() / rand() / timestamp-derived keys are forbidden.
-// EXTEND from story 2.4 — write-authority owned by story 2.1.
-//
-// Forward decl only; concrete class lives in teleproto3_bridge.cpp.
-class CsprngMaskGenerator;
+// A minimal WebSocket client wrapper to replace QWebSocket.
+class MiniWebSocket : public QObject {
+	Q_OBJECT
+public:
+	MiniWebSocket(QSslSocket *tls, const QString &host, const QString &path, QObject *parent = nullptr);
 
-// Factory: returns a new mask generator owned by `parent`. Install via
-// QWebSocket::setMaskGenerator(...) BEFORE calling QWebSocket::open(...).
-QObject *makeCsprngMaskGenerator(QObject *parent);
+	void open();
+	qint64 sendBinaryMessage(const QByteArray &msg);
+	QAbstractSocket::SocketState state() const;
+
+Q_SIGNALS:
+	void connected();
+	void disconnected();
+	void errorOccurred(int code);
+	void binaryMessageReceived(const QByteArray &msg);
+
+private Q_SLOTS:
+	void onReadyRead();
+
+private:
+	QSslSocket *_tls;
+	QString _host;
+	QString _path;
+	QByteArray _buffer;
+	bool _upgraded = false;
+};
+
+// rpl payload for the connection → indicator retry-state push channel (story 2.6).
+// Both connection_teleproto3.h (producer) and proxy_indicator_c1.h (consumer) use this type
+// from this shared header to avoid a layering violation.
+struct RetryStatePayload {
+	int tier = 0;       // 0..3, mirrors t3_retry_state_t enumerant order
+	uint64_t at_ns = 0; // monotonic_ns timestamp of the FSM transition
+};
+
+#if TDESKTOP_TYPE3_CALLS
+// Story 9-1: localhost SOCKS5/CONNECT shim lifecycle wrappers.
+// Thin C++ wrappers over the C t3_shim_* API from t3_shim_socks5.h.
+// ShimHandle is an opaque type; callers hold ShimHandle * only.
+struct ShimHandle;
+
+// Open a new shim listener.  Returns nullptr on failure (logs internally).
+[[nodiscard]] ShimHandle *ShimOpen(
+    const std::string &serverHost,
+    uint16_t           serverPort,
+    const std::string &wsPath,
+    const std::string &secretHex,
+    uint16_t           localPortHint = 0);
+
+// Close and free the shim.  Safe to call with nullptr.
+void ShimClose(ShimHandle *handle);
+
+// Return the localhost port the shim is bound to.  Returns 0 if handle is nullptr.
+[[nodiscard]] uint16_t ShimLocalPort(const ShimHandle *handle);
+#endif // TDESKTOP_TYPE3_CALLS
 
 }  // namespace Tdesktop::Teleproto3
 

@@ -198,7 +198,17 @@ ProxyData::Status ProxyData::status() const {
 }
 
 bool ProxyData::supportsCalls() const {
-	return false;// (type == Type::Socks5);
+#if TDESKTOP_TYPE3_CALLS
+	// P9: every field must be present before this returns true — caller in
+	// calls_call.cpp will otherwise attempt ShimOpen with empty host/wsPath
+	// and we'd take the D5 abort path even though the proxy is "selected".
+	return type == Type::Mtproto3
+		&& !host.isEmpty()
+		&& port > 0
+		&& !password.isEmpty();
+#else
+	return false;
+#endif
 }
 
 bool ProxyData::tryCustomResolve() const {

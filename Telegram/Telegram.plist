@@ -79,5 +79,11 @@
 	<string>NSApplication</string>
 	<key>NSSupportsAutomaticGraphicsSwitching</key>
 	<true/>
+	<!-- Story 2-9 (macOS dev-build): DO-NOT-DISTRIBUTE marker.
+	     Story 2-11 (macOS public release) MUST remove this key before notarisation.
+	     Signing tooling SHOULD reject bundles where DevBuildOnly=YES. -->
+	<key>DevBuildOnly</key>
+	<true/>
+	@T3_CALLS_DOGFOOD_PLIST_FRAGMENT@
 </dict>
 </plist>

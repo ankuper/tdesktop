@@ -26,6 +26,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/audio/media_audio_track.h"
 #include "mtproto/mtproto_config.h"
 #include "mtproto/mtproto_dh_utils.h"
+#if TDESKTOP_TYPE3_CALLS
+#include "mtproto/teleproto3_bridge.h"
+#endif
 #include "ui/boxes/confirm_box.h"
 #include "ui/boxes/rate_call_box.h"
 #include "webrtc/webrtc_create_adm.h"
@@ -1171,12 +1174,70 @@ void Call::createAndStartController(const MTPDphoneCall &call) {
 		if (settingsProxy.useProxyForCalls() && settingsProxy.isEnabled()) {
 			const auto &selected = settingsProxy.selected();
 			if (selected.supportsCalls() && !selected.host.isEmpty()) {
-				Assert(selected.type == ProxyData::Type::Socks5);
-				descriptor.proxy = std::make_unique<tgcalls::Proxy>();
-				descriptor.proxy->host = selected.host.toStdString();
-				descriptor.proxy->port = selected.port;
-				descriptor.proxy->login = selected.user.toStdString();
-				descriptor.proxy->password = selected.password.toStdString();
+				// P11: guard the Mtproto3 arm of this assert behind the build flag
+				// — in TDESKTOP_TYPE3_CALLS=OFF builds the enum value still exists
+				// but treating it as SOCKS5 below leaks plaintext through the wrong path.
+				Assert(selected.type == ProxyData::Type::Socks5
+#if TDESKTOP_TYPE3_CALLS
+					|| selected.type == ProxyData::Type::Mtproto3
+#endif
+					);
+#if TDESKTOP_TYPE3_CALLS
+				if (selected.type == ProxyData::Type::Mtproto3) {
+					// Story 9-1: spawn localhost SOCKS5/CONNECT shim and route tgcalls through it.
+					// XXX 9-2: jitter randomization required before public-release widening (CBR-tell verdict BLOCK 2026-05-09; see _bmad-output/experiments/cbr-tell-2026-05-08/RESULT.md).
+
+					// P8: validate proxy port lies within uint16 range before truncating cast.
+					if (selected.port == 0 || selected.port > 65535) {
+						LOG(("Call Error: Mtproto3 proxy port out of range: %1").arg(selected.port));
+						finish(FinishType::Failed);
+						return;
+					}
+					// P6: drop any stale handle from a prior createAndStartController re-entry
+					// before opening a new one; the RAII deleter calls ShimClose on the old handle.
+					_t3ShimHandle.reset();
+					_t3ShimHandle.reset(Tdesktop::Teleproto3::ShimOpen(
+						selected.host.toStdString(),
+						static_cast<uint16_t>(selected.port),
+						selected.wsPath.toStdString(),
+						selected.password.toStdString(),
+						0 /* ephemeral port */));
+					if (!_t3ShimHandle) {
+						// D5: ShimOpen failure MUST abort the call. Falling through to
+						// descriptor.proxy=nullptr would route tgcalls directly to the
+						// reflector, leaking the UDP CBR signature this story exists to hide.
+						LOG(("Call Error: Type3 shim open failed; aborting call to prevent UDP leak"));
+						finish(FinishType::Failed);
+						return;
+					}
+					const auto shimPort = Tdesktop::Teleproto3::ShimLocalPort(_t3ShimHandle.get());
+					if (shimPort == 0) {
+						// P7: shim bound to ephemeral port 0 means listen() didn't take —
+						// connecting tgcalls to 127.0.0.1:0 is undefined; abort.
+						LOG(("Call Error: Type3 shim ShimLocalPort==0; aborting call"));
+						_t3ShimHandle.reset();
+						finish(FinishType::Failed);
+						return;
+					}
+					descriptor.proxy = std::make_unique<tgcalls::Proxy>();
+					descriptor.proxy->host = "127.0.0.1";
+					descriptor.proxy->port = shimPort;
+					descriptor.proxy->login = "";
+					descriptor.proxy->password = "";
+					// P12: required for the SOCKS5-proxied call path; tgcalls defaults
+					// allowTCP=false which makes Descriptor::proxy=SOCKS5 disable UDP
+					// candidates AND silently skip TCP-flagged reflectors.
+					descriptor.config.allowTCP = true;
+				} else // (type == Type::Socks5) — P10
+#endif // TDESKTOP_TYPE3_CALLS
+				{
+					descriptor.proxy = std::make_unique<tgcalls::Proxy>();
+					descriptor.proxy->host = selected.host.toStdString();
+					descriptor.proxy->port = selected.port;
+					descriptor.proxy->login = selected.user.toStdString();
+					descriptor.proxy->password = selected.password.toStdString();
+					// P12: stock SOCKS5 path keeps tgcalls default allowTCP=false.
+				}
 			}
 		}
 	}
@@ -1662,6 +1723,11 @@ void Call::destroyController() {
 		_instance.reset();
 		DEBUG_LOG(("Call Info: Call controller destroyed."));
 	}
+#if TDESKTOP_TYPE3_CALLS
+	// P6: RAII reset — deleter calls ShimClose only if non-null, so this is safe
+	// to invoke on every teardown path (early-exit, dtor, re-entry, missed close).
+	_t3ShimHandle.reset();
+#endif
 	setSignalBarCount(kSignalBarFinished);
 }
 
