@@ -51,6 +51,14 @@ jobs:
           path: ${{ env.REPO_NAME }}
           fetch-depth: 0
 
+      - name: Clone teleproto3 (sibling).
+        uses: actions/checkout@v6
+        with:
+          repository: ankuper/teleproto3
+          ssh-key: ${{ secrets.TELEPROTO3_DEPLOY_KEY }}
+          path: teleproto3
+          fetch-depth: 1
+
       - name: First set up.
         run: |
           brew update
@@ -126,6 +134,17 @@ jobs:
           cmake --build build
           cmake --install build
 
+      - name: libteleproto3 build.
+        if: env.ONLY_CACHE == 'false'
+        run: |
+          cd $GITHUB_WORKSPACE/teleproto3/lib
+          cmake -Bbuild . \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DT3_BUILD_TESTS=OFF \
+            -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3)
+          cmake --build build --parallel
+          test -f build/libteleproto3.a
+
       - name: Telegram Desktop build.
         if: env.ONLY_CACHE == 'false'
         env:
@@ -140,6 +159,7 @@ jobs:
             -DTDESKTOP_API_TEST=OFF \
             -DTDESKTOP_API_ID=$TDESKTOP_API_ID \
             -DTDESKTOP_API_HASH=$TDESKTOP_API_HASH \
+            -DLIBTELEPROTO3_ROOT=$GITHUB_WORKSPACE/teleproto3 \
             -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO
 
           cmake --build build
