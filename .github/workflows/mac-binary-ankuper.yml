@@ -53,11 +53,11 @@ jobs:
           fetch-depth: 0
 
       - name: Clone teleproto3 (sibling).
-        uses: actions/checkout@v6
-        with:
-          repository: ankuper/teleproto3
-          path: teleproto3
-          fetch-depth: 1
+        # tdesktop's CMakeLists assumes teleproto3 at ${CMAKE_SOURCE_DIR}/../../teleproto3.
+        # actions/checkout cannot place files outside GITHUB_WORKSPACE; use git clone.
+        run: |
+          git clone --depth=1 https://github.com/ankuper/teleproto3.git ../teleproto3
+          ls -la ../teleproto3/lib/include ../teleproto3/spec/ux-strings.yaml
 
       - name: First set up.
         run: |
@@ -137,7 +137,7 @@ jobs:
       - name: libteleproto3 build.
         if: env.ONLY_CACHE == 'false'
         run: |
-          cd $GITHUB_WORKSPACE/teleproto3/lib
+          cd $GITHUB_WORKSPACE/../teleproto3/lib
           cmake -Bbuild . \
             -DCMAKE_BUILD_TYPE=Release \
             -DT3_BUILD_TESTS=OFF \
@@ -159,7 +159,6 @@ jobs:
             -DTDESKTOP_API_TEST=OFF \
             -DTDESKTOP_API_ID=$TDESKTOP_API_ID \
             -DTDESKTOP_API_HASH=$TDESKTOP_API_HASH \
-            -DLIBTELEPROTO3_ROOT=$GITHUB_WORKSPACE/teleproto3 \
             -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO
 
           cmake --build build
