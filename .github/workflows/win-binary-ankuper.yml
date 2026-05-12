@@ -44,7 +44,7 @@ jobs:
           mkdir %userprofile%\TBuild\Libraries
           mklink /d %GITHUB_WORKSPACE%\TBuild %userprofile%\TBuild
           echo TBUILD=%GITHUB_WORKSPACE%\TBuild>>%GITHUB_ENV%
-          echo LibrariesPath=%GITHUB_WORKSPACE%\TBuild\Libraries>>%GITHUB_ENV%
+          echo LibrariesPath=%GITHUB_WORKSPACE%\TBuild\Libraries\win64>>%GITHUB_ENV%
 
       - name: Get repository name.
         shell: bash
@@ -132,35 +132,34 @@ jobs:
       - name: Locate OpenSSL from prepare output.
         shell: pwsh
         run: |
-          # prepare/win.bat builds OpenSSL under Libraries\openssl_3 (or similar).
-          # Probe known candidates to find the include + lib roots.
-          $cands = @(
-            "$env:LibrariesPath\openssl_3\Release",
-            "$env:LibrariesPath\openssl_3",
-            "$env:LibrariesPath\openssl-cache\openssl_3\Release",
-            "$env:LibrariesPath\openssl-cache\openssl_3"
-          )
-          $root = $null
-          foreach ($c in $cands) {
-            if (Test-Path "$c\include\openssl\opensslv.h") { $root = $c; break }
-          }
-          if (-not $root) {
-            Write-Error "Could not locate tdesktop-built OpenSSL under $env:LibrariesPath. Listing for diagnosis:"
+          # prepare/win.bat builds OpenSSL under %LibrariesPath%\openssl3\ with
+          # non-standard layout: include\openssl\ for headers, out\ for Release libs.
+          $root = "$env:LibrariesPath\openssl3"
+          if (-not (Test-Path "$root\include\openssl\opensslv.h")) {
+            Write-Error "OpenSSL headers not found at $root\include\openssl\opensslv.h. Listing for diagnosis:"
             Get-ChildItem -Path $env:LibrariesPath -Recurse -Filter "opensslv.h" -ErrorAction SilentlyContinue | Select-Object FullName
             exit 1
           }
-          echo "OPENSSL_ROOT_DIR=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          Write-Host "OpenSSL located at $root"
+          if (-not (Test-Path "$root\out\libcrypto.lib")) {
+            Write-Error "libcrypto.lib not found at $root\out\libcrypto.lib"
+            Get-ChildItem -Path $env:LibrariesPath -Recurse -Filter "libcrypto.lib" -ErrorAction SilentlyContinue | Select-Object FullName
+            exit 1
+          }
+          echo "OPENSSL3_DIR=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "OpenSSL located at $root (include=$root\include, libs=$root\out)"
 
-      - name: libteleproto3 build (MSVC x64, against tdesktop's OpenSSL).
+      - name: libteleproto3 build (MSVC x64, against tdesktop's OpenSSL, /MT).
         if: env.ONLY_CACHE == 'false'
         shell: cmd
         run: |
           cd %TBUILD%\teleproto3\lib
           cmake -B build -G "Ninja" ^
             -DCMAKE_BUILD_TYPE=Release ^
+            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded ^
             -DT3_BUILD_TESTS=OFF ^
-            -DOPENSSL_ROOT_DIR="%OPENSSL_ROOT_DIR%"
+            -DOPENSSL_INCLUDE_DIR="%OPENSSL3_DIR%\include" ^
+            -DOPENSSL_CRYPTO_LIBRARY="%OPENSSL3_DIR%\out\libcrypto.lib" ^
+            -DOPENSSL_SSL_LIBRARY="%OPENSSL3_DIR%\out\libssl.lib"
           cmake --build build --parallel
           if not exist build\teleproto3.lib (
             echo FAIL: teleproto3.lib not produced

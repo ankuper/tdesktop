@@ -3,11 +3,12 @@
  * Story 2.4: Type3 secret persistence via Security.framework SecItem API.
  */
 
+#import <Foundation/Foundation.h>
+#import <Security/Security.h>
+
 #include "mtproto/secure_store.h"
 
 #ifdef Q_OS_MAC
-
-#import <Security/Security.h>
 
 namespace Tdesktop::Teleproto3::SecureStore {
 
