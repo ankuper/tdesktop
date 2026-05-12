@@ -122,6 +122,55 @@ jobs:
           key: ${{ runner.OS }}-x64-qt6-${{ env.CACHE_KEY }}
           restore-keys: ${{ runner.OS }}-x64-qt6-
 
+      - name: Free up disk space (remove preinstalled tools).
+        shell: pwsh
+        run: |
+          # windows-latest ships with 14 GB disk and 30+ GB of preinstalled
+          # tools we don't need. prepare/win.bat builds Qt+FFmpeg+OpenSSL in
+          # both Debug+Release and otherwise runs out of disk. Remove the big
+          # hitters before the long build step.
+          $before = (Get-PSDrive C).Free / 1GB
+          Write-Host "Free space before cleanup: $([math]::Round($before, 1)) GB"
+
+          $paths = @(
+            'C:\Android',
+            'C:\hostedtoolcache\windows\Ruby',
+            'C:\hostedtoolcache\windows\go',
+            'C:\hostedtoolcache\windows\node',
+            'C:\hostedtoolcache\windows\stack',
+            'C:\hostedtoolcache\windows\PyPy',
+            'C:\hostedtoolcache\windows\Java_Adopt_jdk',
+            'C:\hostedtoolcache\windows\Java_Zulu_jdk',
+            'C:\Program Files\MongoDB',
+            'C:\Program Files\MySQL',
+            'C:\Program Files (x86)\WiX Toolset v3.14',
+            'C:\Program Files (x86)\Microsoft Service Fabric',
+            'C:\Program Files\Microsoft Service Fabric',
+            'C:\Program Files\Microsoft SDKs\Azure',
+            'C:\Program Files\Amazon',
+            'C:\Program Files\Google',
+            'C:\Program Files\Mozilla Firefox',
+            'C:\Program Files\R',
+            'C:\Program Files\PostgreSQL',
+            'C:\Program Files\Unity Hub',
+            'C:\Program Files\dotnet\sdk\NuGetFallbackFolder',
+            'C:\ProgramData\chocolatey\lib\maven',
+            'C:\ProgramData\chocolatey\lib\pulumi',
+            'C:\Program Files\ImageMagick-7.1.2-Q16-HDRI',
+            'C:\Program Files\LLVM',
+            'C:\Program Files (x86)\LLVM',
+            'C:\Program Files (x86)\Android'
+          )
+          foreach ($p in $paths) {
+            if (Test-Path $p) {
+              Write-Host "Removing $p"
+              Remove-Item -Path $p -Recurse -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+          $after = (Get-PSDrive C).Free / 1GB
+          Write-Host "Free space after cleanup:  $([math]::Round($after, 1)) GB (freed $([math]::Round($after - $before, 1)) GB)"
+
       - name: Libraries (Qt6 + FFmpeg + OpenSSL + ...).
         env:
           GYP_MSVS_OVERRIDE_PATH: 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise\'
