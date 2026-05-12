@@ -1,0 +1,213 @@
+name: Windows Release (ankuper).
+run-name: Windows Release (ankuper) — ${{ github.event.head_commit.message || 'manual dispatch' }}
+
+on:
+  push:
+    branches:
+      - dev
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+      - 'changelog.txt'
+      - 'LEGAL'
+      - 'LICENSE'
+      - '.github/**'
+      - '!.github/workflows/win-binary-ankuper.yml'
+      - 'lib/xdg/**'
+      - 'snap/**'
+      - 'Telegram/build/docker/**'
+      - 'Telegram/Resources/uwp/**'
+      - 'Telegram/SourceFiles/platform/linux/**'
+      - 'Telegram/SourceFiles/platform/mac/**'
+      - 'Telegram/Telegram/**'
+      - 'Telegram/configure.sh'
+      - 'Telegram/Telegram.plist'
+  workflow_dispatch:
+
+jobs:
+  windows:
+    name: Windows Release (unsigned, x64, Qt6)
+    runs-on: windows-latest
+
+    env:
+      UPLOAD_ARTIFACT: "true"
+      ONLY_CACHE: "false"
+      PREPARE_PATH: "Telegram/build/prepare/prepare.py"
+
+    defaults:
+      run:
+        shell: cmd
+
+    steps:
+      - name: Prepare directories.
+        run: |
+          mkdir %userprofile%\TBuild\Libraries
+          mklink /d %GITHUB_WORKSPACE%\TBuild %userprofile%\TBuild
+          echo TBUILD=%GITHUB_WORKSPACE%\TBuild>>%GITHUB_ENV%
+          echo LibrariesPath=%GITHUB_WORKSPACE%\TBuild\Libraries>>%GITHUB_ENV%
+
+      - name: Get repository name.
+        shell: bash
+        run: echo "REPO_NAME=${GITHUB_REPOSITORY##*/}" >> $GITHUB_ENV
+
+      - name: Clone tdesktop.
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
+
+      - name: Clone teleproto3 (sibling).
+        uses: actions/checkout@v6
+        with:
+          repository: ankuper/teleproto3
+          path: ${{ env.TBUILD }}\teleproto3
+          fetch-depth: 1
+
+      - name: First set up.
+        shell: bash
+        run: |
+          DOCPATH=$TBUILD/$REPO_NAME/docs/building-win.md
+          SDK="$(grep "SDK version" $DOCPATH | sed -r 's/.*\*\*(.*)\*\* SDK version.*/\1/')"
+          echo "SDK=$SDK" >> $GITHUB_ENV
+
+          sed -i '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/${_Zi}//' "$PROGRAMFILES"/CMake/share/cmake*/Modules/Platform/Windows-MSVC.cmake
+
+          echo "$(sha256sum $TBUILD/$REPO_NAME/$PREPARE_PATH | awk '{ print $1 }')" >> CACHE_KEY.txt
+          echo "$SDK" >> CACHE_KEY.txt
+          echo "ankuper" >> CACHE_KEY.txt
+          echo "CACHE_KEY=$(sha256sum CACHE_KEY.txt | awk '{ print $1 }')" >> $GITHUB_ENV
+
+          git config --global user.email "ci@ankuper"
+          git config --global user.name "ankuper-ci"
+
+      - uses: ilammy/msvc-dev-cmd@v1.13.0
+        name: Native Tools Command Prompt.
+        with:
+          arch: x64
+          sdk: ${{ env.SDK }}
+
+      - name: NuGet sources.
+        run: |
+          nuget sources Disable -Name "Microsoft Visual Studio Offline Packages"
+          nuget sources Add -Source https://api.nuget.org/v3/index.json & exit 0
+
+      - name: ThirdParty cache.
+        id: cache-third-party
+        uses: actions/cache@v5
+        with:
+          path: ${{ env.TBUILD }}\ThirdParty
+          key: ${{ runner.OS }}-x64-third-party-${{ env.CACHE_KEY }}
+          restore-keys: ${{ runner.OS }}-x64-third-party-
+
+      - name: Libraries cache.
+        id: cache-libs
+        uses: actions/cache@v5
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\*
+            !${{ env.LibrariesPath }}\cache_keys
+            !${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\*
+            !${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: ${{ runner.OS }}-x64-libs-${{ env.CACHE_KEY }}
+          restore-keys: ${{ runner.OS }}-x64-libs-
+
+      - name: Qt cache.
+        id: cache-qt
+        uses: actions/cache@v5
+        with:
+          path: |
+            ${{ env.LibrariesPath }}\[qQ]t[_-]*
+            ${{ env.LibrariesPath }}\cache_keys\[qQ]t[_-]*
+          key: ${{ runner.OS }}-x64-qt6-${{ env.CACHE_KEY }}
+          restore-keys: ${{ runner.OS }}-x64-qt6-
+
+      - name: Libraries (Qt6 + FFmpeg + OpenSSL + ...).
+        env:
+          GYP_MSVS_OVERRIDE_PATH: 'C:\Program Files\Microsoft Visual Studio\2022\Enterprise\'
+          GYP_MSVS_VERSION: 2022
+        run: |
+          %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat skip-release silent qt6
+
+      - name: Locate OpenSSL from prepare output.
+        shell: pwsh
+        run: |
+          # prepare/win.bat builds OpenSSL under Libraries\openssl_3 (or similar).
+          # Probe known candidates to find the include + lib roots.
+          $cands = @(
+            "$env:LibrariesPath\openssl_3\Release",
+            "$env:LibrariesPath\openssl_3",
+            "$env:LibrariesPath\openssl-cache\openssl_3\Release",
+            "$env:LibrariesPath\openssl-cache\openssl_3"
+          )
+          $root = $null
+          foreach ($c in $cands) {
+            if (Test-Path "$c\include\openssl\opensslv.h") { $root = $c; break }
+          }
+          if (-not $root) {
+            Write-Error "Could not locate tdesktop-built OpenSSL under $env:LibrariesPath. Listing for diagnosis:"
+            Get-ChildItem -Path $env:LibrariesPath -Recurse -Filter "opensslv.h" -ErrorAction SilentlyContinue | Select-Object FullName
+            exit 1
+          }
+          echo "OPENSSL_ROOT_DIR=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "OpenSSL located at $root"
+
+      - name: libteleproto3 build (MSVC x64, against tdesktop's OpenSSL).
+        if: env.ONLY_CACHE == 'false'
+        shell: cmd
+        run: |
+          cd %TBUILD%\teleproto3\lib
+          cmake -B build -G "Ninja" ^
+            -DCMAKE_BUILD_TYPE=Release ^
+            -DT3_BUILD_TESTS=OFF ^
+            -DOPENSSL_ROOT_DIR="%OPENSSL_ROOT_DIR%"
+          cmake --build build --parallel
+          if not exist build\teleproto3.lib (
+            echo FAIL: teleproto3.lib not produced
+            dir build
+            exit /b 1
+          )
+          echo LIBTELEPROTO3_LIB_PATH=%TBUILD%\teleproto3\lib\build\teleproto3.lib>>%GITHUB_ENV%
+
+      - name: Free up some disk space.
+        shell: bash
+        run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' ')' -type f ')' -o -empty ')' -delete
+
+      - name: Telegram Desktop build.
+        if: env.ONLY_CACHE == 'false'
+        env:
+          TDESKTOP_API_ID: ${{ secrets.TDESKTOP_API_ID }}
+          TDESKTOP_API_HASH: ${{ secrets.TDESKTOP_API_HASH }}
+        run: |
+          cd %TBUILD%\%REPO_NAME%\Telegram
+
+          call configure.bat ^
+            x64 ^
+            qt6 ^
+            -G "Ninja Multi-Config" ^
+            -D CMAKE_CONFIGURATION_TYPES=Release ^
+            -D TDESKTOP_API_TEST=OFF ^
+            -D TDESKTOP_API_ID=%TDESKTOP_API_ID% ^
+            -D TDESKTOP_API_HASH=%TDESKTOP_API_HASH% ^
+            -D LIBTELEPROTO3_ROOT=%TBUILD%\teleproto3 ^
+            -D LIBTELEPROTO3_LIB_PATH=%LIBTELEPROTO3_LIB_PATH% ^
+            -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF ^
+            -D DESKTOP_APP_DISABLE_CRASH_REPORTS=OFF
+
+          cmake --build ..\out --config Release --parallel
+
+      - name: Stage artifact.
+        run: |
+          set OUT=%TBUILD%\%REPO_NAME%\out\Release
+          mkdir artifact
+          move %OUT%\Telegram.exe artifact\
+          move %OUT%\Updater.exe artifact\
+          if exist %OUT%\*.pdb move %OUT%\*.pdb artifact\
+
+      - name: Upload artifact.
+        if: env.UPLOAD_ARTIFACT == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: Telegram-windows-x64-release-unsigned
+          path: artifact\
+          retention-days: 30
