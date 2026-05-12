@@ -116,6 +116,7 @@ jobs:
             -D CMAKE_BUILD_TYPE=Release \
             -D TDESKTOP_API_ID=$TDESKTOP_API_ID \
             -D TDESKTOP_API_HASH=$TDESKTOP_API_HASH \
+            -D LIBTELEPROTO3_ROOT=/usr/src/teleproto3 \
             -D TDESKTOP_LAUNCHER_BASENAME=org.ankuper.tdesktop \
             -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON \
             -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON
