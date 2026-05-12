@@ -1,4 +1,5 @@
 name: Linux binary (ankuper)
+run-name: Linux binary (ankuper) — ${{ github.event.head_commit.message || 'manual dispatch' }}
 
 # Manual-dispatch workflow that produces a Release-mode Telegram ELF binary
 # suitable for ad-hoc runtime testing (e.g. TSPU-bypass validation through
