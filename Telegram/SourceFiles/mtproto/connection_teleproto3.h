@@ -70,6 +70,9 @@ public:
 	QString transport() const override;
 	QString tag() const override;
 
+	// Story 2-13: populate Type3-specific fields for the [T3-keepalive] block.
+	[[nodiscard]] KeepaliveSnapshot collectKeepaliveSnapshot() const override;
+
 	// Story 2.6 §rpl-signal-contract — push channel for retry-tier transitions.
 	// Worker-thread only. UI consumers MUST use the retryStateChanged() Qt signal
 	// (delivered via Qt::QueuedConnection) instead of subscribing to rpl directly.
@@ -160,6 +163,15 @@ private:
 	CTRState _obfRecvState = {};
 	MTPint128 _checkNonce = {};
 	bool _connectionStarted = false;
+
+	// Story 2-13: cache members for the [T3-keepalive] snapshot. Updated at
+	// connect entry, on every binary recv, on retry-tier transitions, and on
+	// silent-close delay sampling. Read-only by the snapshot accessor.
+	crl::time _connectToServerAtMs = 0;
+	crl::time _lastBinaryRecvAtMs = 0;
+	t3_retry_state_t _lastRetryTier = T3_RETRY_TIER1;
+	bool _lastRetryTierEverSet = false;  // Story 2-13 D3 (party-mode): sentinel — distinguishes default-init from real tier-1 transition.
+	std::int64_t _lastSilentCloseSampleNs = -1;
 
 	// Network-change observer (platform-specific; owns the QObject via Qt parent chain).
 	QObject *_networkObserver = nullptr;

@@ -566,6 +566,8 @@ PRIVATE
     ui/peer/color_sample.h
     ui/power_saving.cpp
     ui/power_saving.h
+    ui/proxy_indicator_c1.cpp
+    ui/proxy_indicator_c1.h
     ui/vertical_list.cpp
     ui/vertical_list.h
     ui/unread_badge_paint.cpp
@@ -619,3 +621,7 @@ PRIVATE
     desktop-app::external_kcoreaddons
     desktop-app::external_webrtc
 )
+# NOTE: teleproto3 link + token QRC for td_ui (proxy_indicator_c1.cpp) are wired
+# in CMakeLists.txt after the teleproto3 IMPORTED target is defined (line ~76),
+# because LIBTELEPROTO3_ROOT is set after this file is included (line 38).
+# See "Story 2.5 — Subtask 2.1" block in CMakeLists.txt.

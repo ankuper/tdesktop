@@ -683,7 +683,8 @@ void SessionPrivate::tryToSend() {
 			: _instance->systemVersion();
 		const auto appVersion = ComputeAppVersion();
 		const auto proxyType = _options->proxy.type;
-		const auto mtprotoProxy = (proxyType == ProxyData::Type::Mtproto);
+		const auto mtprotoProxy = (proxyType == ProxyData::Type::Mtproto // Story 2-13a: Mtproto3 routing parity.
+			|| proxyType == ProxyData::Type::Mtproto3);
 		const auto clientProxyFields = mtprotoProxy
 			? MTP_inputClientProxy(
 				MTP_string(_options->proxy.host),
@@ -1012,6 +1013,13 @@ void SessionPrivate::connectToServer(bool afterConfig) {
 		return;
 	}
 
+	// Story 2-13 D4 (party-mode): belt-and-braces throttle reset for the
+	// [T3-keepalive] block. Idempotent with the two existing reset sites at
+	// onConnected() and confirmBestConnection() — closes the reconnect-cascade
+	// race where throttle survives across `_connection` rebirth on paths that
+	// bypass move-assign.
+	_keepaliveBlockEmittedForThisConnection = false;
+
 	destroyAllConnections();
 
 	if (realDcTypeChanged() && _keyCreator) {
@@ -1030,7 +1038,8 @@ void SessionPrivate::connectToServer(bool afterConfig) {
 			return;
 		}
 	}
-	if (_options->proxy.type == ProxyData::Type::Mtproto) {
+	if (_options->proxy.type == ProxyData::Type::Mtproto // Story 2-13a: Mtproto3 routing parity — both proxy types skip DC-option lookup and read host/port from proxy config.
+		|| _options->proxy.type == ProxyData::Type::Mtproto3) {
 		// host, port, secret for mtproto proxy are taken from proxy.
 		appendTestConnection(DcOptions::Variants::Tcp, {}, 0, {});
 	} else {
@@ -1190,6 +1199,14 @@ void SessionPrivate::sendPingByTimer() {
 			+ kPingSendAfterForce
 			- kPingSendAfter;
 		if (mustSendTill < now + 1000) {
+			// Story 2-13: deep keepalive snapshot before restart. Debug-gated
+			// (level-0 marker still fires); throttled per-_connection.
+			if (Logs::DebugEnabled()
+				&& !_keepaliveBlockEmittedForThisConnection
+				&& _connection) {
+				emitKeepaliveBlock();
+				_keepaliveBlockEmittedForThisConnection = true;
+			}
 			LOG(("Could not send ping for some seconds, restarting..."));
 			return restart();
 		} else {
@@ -1197,6 +1214,92 @@ void SessionPrivate::sendPingByTimer() {
 		}
 	} else {
 		_sessionData->queueNeedToResumeAndSend();
+	}
+}
+
+void SessionPrivate::emitKeepaliveBlock() {
+	// Story 2-13: 16-line [T3-keepalive] diagnostic block. Field order is the
+	// stable contract; tests in 2-13-tests/ assert exact ordering. Snapshot is
+	// collected once (before restart) so all fields share a consistent moment.
+	// Wrapped in try/catch (Task 6 / I/O Matrix row 4) so any logging failure
+	// does NOT abort the restart path; sendPingByTimer must reach restart().
+	// P8 (party-mode): catch is narrowed to std::exception with what() so a
+	// programmer error (nullptr deref, etc.) is not silently swallowed.
+	try {
+		const auto snap = _connection->collectKeepaliveSnapshot();
+		const auto now = crl::now();
+
+		const auto fmtInt = [](const auto &opt) -> QString {
+			return opt ? QString::number(*opt) : u"-"_q;
+		};
+		const auto fmtStr = [](const std::optional<QString> &opt) -> QString {
+			return opt ? *opt : u"-"_q;
+		};
+
+		// 8-byte FNV-1a hash over MTProto session generation tuple
+		// (_keyId, _sessionId, _sessionSalt, _messagesCounter). Equal hashes
+		// across two captures = same session generation kept wedging; differing
+		// hashes = session reset between captures (auth_key staleness ruled out).
+		const auto sessionStateHash = [&]() -> std::uint64_t {
+			std::uint64_t h = 0xcbf29ce484222325ULL;
+			const auto mix = [&h](std::uint64_t v) {
+				for (int i = 0; i < 8; ++i) {
+					h ^= (v >> (i * 8)) & 0xffULL;
+					h *= 0x100000001b3ULL;
+				}
+			};
+			mix(_keyId);
+			mix(_sessionId);
+			mix(_sessionSalt);
+			mix(static_cast<std::uint64_t>(_messagesCounter));
+			return h;
+		}();
+
+		// P7 (party-mode): _pingSendAt == 0 means "ping never sent"; render as
+		// `-` to match the absence-encoding contract used by ms_since_last_ping_ack.
+		const auto pingSendAtStr = (_pingSendAt > 0)
+			? QString::number(_pingSendAt)
+			: u"-"_q;
+
+		// Field-list order MUST match Design Notes §field-list (story 2-13).
+		LOG(("[T3-keepalive] ping_id=%1"
+			).arg(_pingId));
+		LOG(("[T3-keepalive] ping_send_at_ms=%1"
+			).arg(pingSendAtStr));
+		LOG(("[T3-keepalive] backoff_step_ms=%1"
+			).arg(fmtInt(snap.backoff_step_ms)));
+		LOG(("[T3-keepalive] status=%1"
+			).arg(fmtStr(snap.status)));
+		LOG(("[T3-keepalive] obf_send_counter=%1"
+			).arg(fmtInt(snap.obf_send_counter)));
+		LOG(("[T3-keepalive] obf_recv_counter=%1"
+			).arg(fmtInt(snap.obf_recv_counter)));
+		LOG(("[T3-keepalive] pending_queue_size=%1"
+			).arg(fmtInt(snap.pending_queue_size)));
+		LOG(("[T3-keepalive] pending_queue_bytes=%1"
+			).arg(fmtInt(snap.pending_queue_bytes)));
+		LOG(("[T3-keepalive] received_queue_size=%1"
+			).arg(_connection->received().size()));
+		LOG(("[T3-keepalive] last_retry_tier=%1"
+			).arg(fmtInt(snap.last_retry_tier)));
+		LOG(("[T3-keepalive] last_silent_close_ns=%1"
+			).arg(fmtInt(snap.last_silent_close_ns)));
+		LOG(("[T3-keepalive] ms_since_connect=%1"
+			).arg(fmtInt(snap.ms_since_connect)));
+		// P12 (party-mode): clamp delta to >=0 — defensive against monotonic
+		// clock anomaly. Underflow renders absurd 19-digit values misleading triage.
+		LOG(("[T3-keepalive] ms_since_last_ping_ack=%1"
+			).arg(_pingSendAt > 0
+				? QString::number(std::max<crl::time>(0, now - _pingSendAt))
+				: u"-"_q));
+		LOG(("[T3-keepalive] ms_since_binary_recv=%1"
+			).arg(fmtInt(snap.ms_since_binary_recv)));
+		LOG(("[T3-keepalive] ack_buffer_count=%1"
+			).arg(_ackRequestData.size()));
+		LOG(("[T3-keepalive] session_state_hash=%1"
+			).arg(QString::number(sessionStateHash, 16)));
+	} catch (const std::exception &e) {
+		LOG(("[T3-keepalive] block_emit_failed: %1").arg(e.what()));
 	}
 }
 
@@ -2338,6 +2441,8 @@ void SessionPrivate::onConnected(
 		DEBUG_LOG(("MTP Info: connection through IPv4 succeed."));
 		_waitForBetterTimer.cancel();
 		_connection = std::move(i->data);
+		// Story 2-13: fresh _connection — allow one [T3-keepalive] block.
+		_keepaliveBlockEmittedForThisConnection = false;
 		_testConnections.clear();
 		checkAuthKey();
 	}
@@ -2374,6 +2479,8 @@ void SessionPrivate::confirmBestConnection() {
 		).arg(i->data->tag()));
 
 	_connection = std::move(i->data);
+	// Story 2-13: fresh _connection — allow one [T3-keepalive] block.
+	_keepaliveBlockEmittedForThisConnection = false;
 	_testConnections.clear();
 
 	checkAuthKey();

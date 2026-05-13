@@ -92,6 +92,10 @@ private:
 	void waitBetterFailed();
 	void markConnectionOld();
 	void sendPingByTimer();
+	// Story 2-13: emit a 16-line [T3-keepalive] block capturing per-connection
+	// internal state at the Could-not-send-ping restart moment. Debug-gated;
+	// throttled to one block per _connection instance.
+	void emitKeepaliveBlock();
 	void destroyAllConnections();
 
 	void confirmBestConnection();
@@ -193,6 +197,11 @@ private:
 	ConnectionPointer _connection;
 	std::vector<TestConnection> _testConnections;
 	crl::time _startedConnectingAt = 0;
+
+	// Story 2-13: throttle for the [T3-keepalive] block — one emit per fresh
+	// _connection instance. Reset on _connection assignment in onConnected /
+	// confirmBestConnection.
+	bool _keepaliveBlockEmittedForThisConnection = false;
 
 	base::Timer _retryTimer; // exp retry timer
 	int _retryTimeout = 1;

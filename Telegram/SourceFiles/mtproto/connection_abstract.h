@@ -14,7 +14,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QObject>
 #include <QtCore/QThread>
 
+#include <cstdint>
 #include <deque>
+#include <optional>
 
 namespace MTP {
 
@@ -101,6 +103,26 @@ public:
 
 	[[nodiscard]] virtual QString transport() const = 0;
 	[[nodiscard]] virtual QString tag() const = 0;
+
+	// Story 2-13: per-connection state snapshot for the [T3-keepalive] block emitted
+	// by SessionPrivate on the Could-not-send-ping restart path. Default-empty struct;
+	// only ConnectionTeleproto3 overrides. Non-Type3 transports honestly report
+	// std::nullopt for every field — SessionPrivate renders nullopt as "-".
+	struct KeepaliveSnapshot {
+		std::optional<int> backoff_step_ms;
+		std::optional<QString> status;
+		std::optional<std::uint64_t> obf_send_counter;
+		std::optional<std::uint64_t> obf_recv_counter;
+		std::optional<int> pending_queue_size;
+		std::optional<int> pending_queue_bytes;
+		std::optional<int> last_retry_tier;
+		std::optional<std::int64_t> last_silent_close_ns;
+		std::optional<crl::time> ms_since_connect;
+		std::optional<crl::time> ms_since_binary_recv;
+	};
+	[[nodiscard]] virtual KeepaliveSnapshot collectKeepaliveSnapshot() const {
+		return {};
+	}
 
 	void setSentEncryptedWithKeyId(uint64 keyId) {
 		_sentEncryptedWithKeyId = keyId;

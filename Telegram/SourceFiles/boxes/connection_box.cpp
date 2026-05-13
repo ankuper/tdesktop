@@ -58,6 +58,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_menu_icons.h"
 #include "styles/style_settings.h"
 
+#include "ui/proxy_indicator_c1.h"
+
 #include <QtGui/QGuiApplication>
 #include <QtGui/QClipboard>
 
@@ -98,7 +100,8 @@ using ProxyData = MTP::ProxyData;
 [[nodiscard]] bool ProxyDataIsShareable(const ProxyData &proxy) {
 	using Type = ProxyData::Type;
 	return (proxy.type == Type::Socks5)
-		|| (proxy.type == Type::Mtproto);
+		|| (proxy.type == Type::Mtproto)
+		|| (proxy.type == Type::Mtproto3);
 }
 
 [[nodiscard]] QString ProxyDataToQueryPath(const ProxyData &proxy) {
@@ -107,6 +110,7 @@ using ProxyData = MTP::ProxyData;
 		switch (proxy.type) {
 		case Type::Socks5: return u"socks"_q;
 		case Type::Mtproto: return u"proxy"_q;
+		case Type::Mtproto3: return u"proxy"_q;  // same link form as Type2
 		case Type::None:
 		case Type::Http: return QString();
 		}
@@ -115,14 +119,18 @@ using ProxyData = MTP::ProxyData;
 	if (path.isEmpty()) {
 		return QString();
 	}
+	const auto isMtprotoFamily = (proxy.type == Type::Mtproto)
+		|| (proxy.type == Type::Mtproto3);
 	return path
 		+ "?server=" + proxy.host + "&port=" + QString::number(proxy.port)
 		+ ((proxy.type == Type::Socks5 && !proxy.user.isEmpty())
 			? "&user=" + qthelp::url_encode(proxy.user) : "")
 		+ ((proxy.type == Type::Socks5 && !proxy.password.isEmpty())
 			? "&pass=" + qthelp::url_encode(proxy.password) : "")
-		+ ((proxy.type == Type::Mtproto && !proxy.password.isEmpty())
-			? "&secret=" + proxy.password : "");
+		+ ((isMtprotoFamily && !proxy.password.isEmpty())
+			? "&secret=" + proxy.password : "")
+		+ ((proxy.type == Type::Mtproto3 && !proxy.wsPath.isEmpty())
+			? "&wspath=" + qthelp::url_encode(proxy.wsPath) : "");
 }
 
 [[nodiscard]] QString ProxyDataToLocalLink(const ProxyData &proxy) {
@@ -279,6 +287,9 @@ void ShowProxyQrBox(std::shared_ptr<Ui::Show> show, const QString &link) {
 		proxy.password = fields.value(u"pass"_q);
 	} else if (type == ProxyData::Type::Mtproto) {
 		proxy.password = fields.value(u"secret"_q);
+	} else if (type == ProxyData::Type::Mtproto3) {
+		proxy.password = fields.value(u"secret"_q);
+		proxy.wsPath = fields.value(u"wspath"_q);
 	}
 	return proxy;
 };
@@ -330,17 +341,29 @@ void AddProxyFromClipboard(
 				if (!match) {
 					continue;
 				}
-				const auto type = isSocks
-					? ProxyData::Type::Socks5
-					: ProxyData::Type::Mtproto;
 				auto fields = url_parse_params(
 					match->captured(1),
 					qthelp::UrlParamNameTransform::ToLower);
-				if (type == ProxyData::Type::Mtproto) {
+				if (!isSocks) {
 					auto &secret = fields[u"secret"_q];
 					secret.replace('+', '-').replace('/', '_');
 				}
-				const auto proxy = ProxyDataFromFields(type, fields);
+				// Determine exact type: try Mtproto3 (0xff marker) first.
+				// Discrimination: if the decoded secret's first octet is 0xff
+				// AND t3_secret_parse succeeds → Type3; otherwise → Mtproto.
+				// DO NOT silently re-route Type2 → Type3 or vice versa (FR22).
+				const auto mtproto3Candidate = isSocks
+					? ProxyData()
+					: ProxyDataFromFields(
+						ProxyData::Type::Mtproto3, fields);
+				const auto type = isSocks
+					? ProxyData::Type::Socks5
+					: (!mtproto3Candidate.type3KeyOctets().empty()
+						? ProxyData::Type::Mtproto3
+						: ProxyData::Type::Mtproto);
+				const auto proxy = (type == ProxyData::Type::Mtproto3)
+					? mtproto3Candidate
+					: ProxyDataFromFields(type, fields);
 				if (!proxy) {
 					const auto status = proxy.status();
 					return (status == ProxyData::Status::Unsupported)
@@ -349,6 +372,27 @@ void AddProxyFromClipboard(
 						? Result::IncorrectSecret
 						: Result::Invalid;
 				}
+				// FR9: Type3 same-key match instead of whole-record contains.
+				if (type == ProxyData::Type::Mtproto3) {
+					const auto existingId = controller->findByType3Key(proxy);
+					if (existingId.has_value()) {
+						controller->replaceType3InPlace(*existingId, proxy);
+						if (isSingle) {
+							show->showToast(
+								tr::lng_proxy_add_from_clipboard_existing_toast(
+									tr::now));
+						}
+					} else {
+						if (isSingle) {
+							show->showToast(
+								tr::lng_proxy_add_from_clipboard_good_toast(
+									tr::now));
+						}
+						controller->addNewItem(proxy);
+					}
+					break;
+				}
+				// Type1/Type2 path: whole-record contains check.
 				const auto contains = controller->contains(proxy);
 				const auto toast = (contains
 					? tr::lng_proxy_add_from_clipboard_existing_toast
@@ -529,6 +573,11 @@ private:
 	Ui::Animations::Simple _setAnimation;
 	std::unique_ptr<Ui::InfiniteRadialAnimation> _progress;
 	std::unique_ptr<Ui::InfiniteRadialAnimation> _checking;
+
+	// C1 indicator for Type3 (Mtproto3) proxy entries (story 2.5, Subtask 7.1).
+	// Type1/Type2 entries continue to use the existing v1 radial indicator.
+	// Null for all non-Mtproto3 entries.
+	std::unique_ptr<Tdesktop::Teleproto3::IndicatorC1> _c1Indicator;
 
 	int _skipLeft = 0;
 	int _skipRight = 0;
@@ -720,6 +769,39 @@ void ProxyRow::updateFields(View &&view) {
 			st::defaultRadio.duration);
 	}
 
+	// C1 indicator: create for Type3, destroy for other types (Subtask 7.1).
+	// Session pointer is null here (ProxyRow has no access to t3_session_t*);
+	// state is driven manually from ItemState. Polling kicks in when a real
+	// session is wired in by story 2.6 / 2.10 via setRetryState() injection.
+	const bool isMtproto3 = (_view.type == u"MTPROTO3"_q);
+	if (isMtproto3 && !_c1Indicator) {
+		_c1Indicator = std::make_unique<Tdesktop::Teleproto3::IndicatorC1>(
+			this, nullptr);
+		_c1Indicator->show();
+	} else if (!isMtproto3) {
+		_c1Indicator.reset();
+	}
+
+	if (_c1Indicator) {
+		// Map ItemState → C1VisualState for the proxy list indicator.
+		using VS = Tdesktop::Teleproto3::C1VisualState;
+		switch (state) {
+		case State::Connecting:
+			_c1Indicator->setVisualState(VS::Connecting);
+			break;
+		case State::Online:
+			_c1Indicator->setRetryState(T3_RETRY_OK);
+			break;
+		case State::Available:
+			_c1Indicator->setVisualState(VS::ConnectedUnverified);
+			break;
+		case State::Checking:
+		case State::Unavailable:
+			_c1Indicator->setVisualState(VS::Idle);
+			break;
+		}
+	}
+
 	setPointerCursor(!_view.deleted);
 
 	update();
@@ -743,6 +825,16 @@ int ProxyRow::resizeGetHeight(int newWidth) {
 		(result - _menuToggle->height()) / 2,
 		newWidth);
 	right += _menuToggle->width();
+
+	// C1 indicator for Mtproto3 entries: place to the left of the menu toggle (Subtask 7.1).
+	if (_c1Indicator) {
+		const auto c1Size = st::normalFont->height;
+		const auto c1Spacing = st::proxyRowPadding.left() / 4;
+		_c1Indicator->resize(c1Size, c1Size);
+		_c1Indicator->moveToRight(right + c1Spacing, (result - c1Size) / 2, newWidth);
+		right += c1Size + c1Spacing * 2;
+	}
+
 	_skipRight = right;
 	_skipLeft = st::proxyRowPadding.left()
 		+ st::proxyRowIconSkip;
@@ -1389,7 +1481,8 @@ void ProxyBox::prepare() {
 			_port->setFocus();
 		} else if (_port->hasFocus()
 			&& !_port->getLastText().trimmed().isEmpty()) {
-			if (_type->current() == Type::Mtproto) {
+			const auto cur = _type->current();
+			if (cur == Type::Mtproto || cur == Type::Mtproto3) {
 				_secret->setFocus();
 			} else {
 				_user->setFocus();
@@ -1418,7 +1511,9 @@ void ProxyBox::refreshButtons() {
 
 	const auto type = _type->current();
 	if (_allowShare
-		&& (type == Type::Socks5 || type == Type::Mtproto)) {
+		&& (type == Type::Socks5
+			|| type == Type::Mtproto
+			|| type == Type::Mtproto3)) {
 		addLeftButton(tr::lng_proxy_share(), [=] { share(); });
 	}
 }
@@ -1441,12 +1536,32 @@ ProxyData ProxyBox::collectData() {
 	result.type = _type->current();
 	result.host = _host->getLastText().trimmed();
 	result.port = _port->getLastText().trimmed().toInt();
-	result.user = (result.type == Type::Mtproto)
+	const auto isMtprotoFamily = (result.type == Type::Mtproto
+		|| result.type == Type::Mtproto3);
+	result.user = isMtprotoFamily
 		? QString()
 		: _user->getLastText();
-	result.password = (result.type == Type::Mtproto)
+	result.password = isMtprotoFamily
 		? _secret->getLastText()
 		: _password->getLastText();
+	// wsPath: not yet exposed via a UI widget (story 2.6 forward-cite).
+	// Preserved from the original data via the editItemBox callback.
+
+	// Auto-promote: if the user selected MTPROTO but pasted a Type3 secret
+	// (0xff prefix in hex, or base64url-decoded first byte == 0xff),
+	// automatically switch to Mtproto3. The UI doesn't expose a separate
+	// Mtproto3 radio button — detection is by secret format.
+	if (result.type == Type::Mtproto && !result.password.isEmpty()) {
+		const auto pw = result.password.toLower();
+		// Hex-encoded Type3: starts with "ff" and is long enough for domain
+		if (pw.size() >= 36 && pw[0] == 'f' && pw[1] == 'f') {
+			result.type = Type::Mtproto3;
+		}
+	}
+
+	const auto isMtprotoFamilyFinal = (result.type == Type::Mtproto
+		|| result.type == Type::Mtproto3);
+
 	if (result.host.isEmpty()) {
 		_host->showError();
 	} else if (!result.port) {
@@ -1454,7 +1569,7 @@ ProxyData ProxyBox::collectData() {
 	} else if ((result.type == Type::Http || result.type == Type::Socks5)
 		&& !result.password.isEmpty() && result.user.isEmpty()) {
 		_user->showError();
-	} else if (result.type == Type::Mtproto && !result.valid()) {
+	} else if (isMtprotoFamilyFinal && !result.valid()) {
 		_secret->showError();
 	} else if (!result) {
 		_host->showError();
@@ -1538,7 +1653,9 @@ void ProxyBox::setupCredentials(const ProxyData &data) {
 		passwordWrap.data(),
 		st::connectionPasswordInputField,
 		tr::lng_connection_password_ph(),
-		(data.type == Type::Mtproto) ? QString() : data.password);
+		(data.type == Type::Mtproto || data.type == Type::Mtproto3)
+			? QString()
+			: data.password);
 	_password->move(0, 0);
 	_password->heightValue(
 	) | rpl::on_next([=, wrap = passwordWrap.data()](int height) {
@@ -1564,7 +1681,9 @@ void ProxyBox::setupMtprotoCredentials(const ProxyData &data) {
 		secretWrap.data(),
 		st::connectionUserInputField,
 		tr::lng_connection_proxy_secret_ph(),
-		(data.type == Type::Mtproto) ? data.password : QString());
+		(data.type == Type::Mtproto || data.type == Type::Mtproto3)
+			? data.password
+			: QString());
 	_secret->move(0, 0);
 	_secret->heightValue(
 	) | rpl::on_next([=, wrap = secretWrap.data()](int height) {
@@ -1596,7 +1715,7 @@ void ProxyBox::setupControls(const ProxyData &data) {
 			type == Type::Http || type == Type::Socks5,
 			anim::type::instant);
 		_mtprotoCredentials->toggle(
-			type == Type::Mtproto,
+			type == Type::Mtproto || type == Type::Mtproto3,
 			anim::type::instant);
 		_aboutSponsored->toggle(
 			type == Type::Mtproto,
@@ -1736,7 +1855,10 @@ void ProxiesBoxController::ShowApplyConfirmation(
 		if (type == Type::Socks5) {
 			add(proxy.user, tr::lng_proxy_box_username());
 			add(proxy.password, tr::lng_proxy_box_password());
-		} else if (type == Type::Mtproto) {
+		} else if (type == Type::Mtproto || type == Type::Mtproto3) {
+			// AC-2 Note: secret bytes MUST NOT be displayed in plaintext
+			// (NFR13/NFR14 boundary; story 2.4 owns secure-storage migration).
+			// Show only the encoded string form from the pasted link.
 			add(proxy.password, tr::lng_proxy_box_secret());
 		}
 
@@ -2083,8 +2205,26 @@ void ProxiesBoxController::setDeleted(int id, bool deleted) {
 }
 
 object_ptr<Ui::BoxContent> ProxiesBoxController::editItemBox(int id) {
-	return Box<ProxyBox>(findById(id)->data, [=](const ProxyData &result) {
+	return Box<ProxyBox>(findById(id)->data, [=](const ProxyData &resultIn) {
 		auto i = findById(id);
+		// For Mtproto3: wsPath has no UI widget yet (story 2.6 forward-cite).
+		// Preserve wsPath from the original entry so it is not lost on edit.
+		auto result = resultIn;
+		if (result.type == Type::Mtproto3 && i != end(_list)) {
+			result.wsPath = i->data.wsPath;
+		}
+		// FR9: for Mtproto3, use same-key match instead of whole-record find.
+		if (result.type == Type::Mtproto3) {
+			const auto existingId = findByType3Key(result);
+			if (existingId.has_value() && *existingId != i->id) {
+				auto j = findById(*existingId);
+				if (j != end(_list)) {
+					j->data = result;
+					replaceItemWith(i, j);
+					return;
+				}
+			}
+		}
 		auto j = ranges::find(
 			_list,
 			result,
@@ -2133,6 +2273,17 @@ void ProxiesBoxController::replaceItemValue(
 
 object_ptr<Ui::BoxContent> ProxiesBoxController::addNewItemBox() {
 	return Box<ProxyBox>(ProxyData(), [=](const ProxyData &result) {
+		// FR9: for Mtproto3, match by 16-byte key instead of whole record.
+		// Note: wsPath will be empty here (no UI widget yet; story 2.6).
+		if (result.type == Type::Mtproto3) {
+			const auto existingId = findByType3Key(result);
+			if (existingId.has_value()) {
+				replaceType3InPlace(*existingId, result);
+			} else {
+				addNewItem(result);
+			}
+			return;
+		}
 		auto j = ranges::find(
 			_list,
 			result,
@@ -2164,6 +2315,33 @@ void ProxiesBoxController::addNewItem(const ProxyData &proxy) {
 	_list.push_back({ ++_idCounter, proxy });
 	refreshChecker(_list.back());
 	applyItem(_list.back().id);
+}
+
+auto ProxiesBoxController::findByType3Key(const ProxyData &proxy) const
+-> std::optional<int> {
+	if (proxy.type != Type::Mtproto3) {
+		return std::nullopt;
+	}
+	const auto it = ranges::find_if(_list, [&](const Item &item) {
+		return item.data.sameType3Key(proxy);
+	});
+	if (it == end(_list)) {
+		return std::nullopt;
+	}
+	return it->id;
+}
+
+void ProxiesBoxController::replaceType3InPlace(
+		int id,
+		const ProxyData &updated) {
+	auto i = findById(id);
+	if (i == end(_list)) {
+		return;
+	}
+	if (i->data == updated) {
+		return;
+	}
+	replaceItemValue(i, updated);
 }
 
 bool ProxiesBoxController::setProxySettings(ProxyData::Settings value) {
@@ -2250,6 +2428,9 @@ void ProxiesBoxController::updateView(const Item &item) {
 		case Type::Http: return u"HTTP"_q;
 		case Type::Socks5: return u"SOCKS5"_q;
 		case Type::Mtproto: return u"MTPROTO"_q;
+		// Codegen-gap: lng_proxy_type_mtproto3 owned by story 2.6.
+		// Placeholder literal used until story 2.6 authors the key.
+		case Type::Mtproto3: return u"MTPROTO3"_q;
 		}
 		Unexpected("Proxy type in ProxiesBoxController::updateView.");
 	}();
@@ -2309,6 +2490,45 @@ void ProxiesBoxController::Show(
 		const QString &highlightId) {
 	controller->show(
 		CreateOwningBox(&controller->session().account(), highlightId));
+}
+
+std::unique_ptr<Tdesktop::Teleproto3::IndicatorC1>
+ProxiesBoxController::createActiveC1Indicator(QWidget *parent) {
+	// Return nullptr if the selected proxy is not Mtproto3 (Subtask 7.2).
+	const auto &selected = _settings.selected();
+	if (selected.type != ProxyData::Type::Mtproto3) {
+		return nullptr;
+	}
+	// Create the indicator. Session pointer is null here — the connection layer
+	// (story 2.6 / 2.10) wires the real t3_session_t* after the session is live.
+	// Drive state from the views() stream in the meantime.
+	auto indicator = std::make_unique<Tdesktop::Teleproto3::IndicatorC1>(
+		parent, nullptr);
+	auto *raw = indicator.get();
+	auto weak = QPointer<Tdesktop::Teleproto3::IndicatorC1>(raw);
+	views()
+		| rpl::filter([](const ItemView &v) { return v.selected; })
+		| rpl::on_next([weak](const ItemView &v) {
+			if (!weak) return;
+			using VS = Tdesktop::Teleproto3::C1VisualState;
+			using State = ProxiesBoxController::ItemState;
+			switch (v.state) {
+			case State::Connecting:
+				weak->setVisualState(VS::Connecting);
+				break;
+			case State::Online:
+				weak->setRetryState(T3_RETRY_OK);
+				break;
+			case State::Available:
+				weak->setVisualState(VS::ConnectedUnverified);
+				break;
+			case State::Checking:
+			case State::Unavailable:
+				weak->setVisualState(VS::Idle);
+				break;
+			}
+		}, raw->lifetime());
+	return indicator;
 }
 
 ProxiesBoxController::~ProxiesBoxController() {
