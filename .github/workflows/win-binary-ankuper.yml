@@ -27,7 +27,7 @@ on:
 jobs:
   windows:
     name: Windows Release (unsigned, x64, Qt6)
-    runs-on: windows-latest
+    runs-on: windows-2022
 
     env:
       UPLOAD_ARTIFACT: "true"
