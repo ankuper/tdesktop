@@ -1631,9 +1631,9 @@ PRIVATE
     mtproto/teleproto3_bridge.cpp
     mtproto/teleproto3_bridge.h
     mtproto/secure_store.h
-    $<$<BOOL:${WIN32}>:mtproto/secure_store_win.cpp>
-    $<$<BOOL:${APPLE}>:mtproto/secure_store_mac.mm>
-    $<$<BOOL:${LINUX}>:mtproto/secure_store_linux.cpp>
+    $<$<PLATFORM_ID:Windows>:mtproto/secure_store_win.cpp>
+    $<$<PLATFORM_ID:Darwin>:mtproto/secure_store_mac.mm>
+    $<$<PLATFORM_ID:Linux>:mtproto/secure_store_linux.cpp>
     mtproto/core_types.h
     mtproto/dedicated_file_loader.cpp
     mtproto/dedicated_file_loader.h
