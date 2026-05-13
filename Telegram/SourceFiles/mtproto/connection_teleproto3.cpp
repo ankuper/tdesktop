@@ -170,6 +170,9 @@ void ConnectionTeleproto3::connectToServer(
 		const bytes::vector &protocolSecret,
 		int16 protocolDcId,
 		bool protocolForFiles) {
+	// Story 2-13: cache write — connect-attempt epoch for ms_since_connect.
+	_connectToServerAtMs = crl::now();
+
 	// For Type3/Mtproto proxies, session_private passes empty ip/0 port.
 	// Use the proxy's own host:port for the TLS/WS connection.
 	_connectAddress = _proxy.host;
@@ -404,6 +407,9 @@ void ConnectionTeleproto3::onWsConnected() {
 }
 
 void ConnectionTeleproto3::onWsBinaryMessage(const QByteArray &data) {
+	// Story 2-13: cache write — last binary frame timestamp for ms_since_binary_recv.
+	_lastBinaryRecvAtMs = crl::now();
+
 	if (_status == Status::Negotiating) {
 		// Decrypt the response.
 		auto decrypted = bytes::vector(data.size());
@@ -771,6 +777,12 @@ void ConnectionTeleproto3::emitRetryState(t3_retry_state_t state) {
 	_retryStateStream.fire_copy(payload);
 	Q_EMIT retryStateChanged(payload);
 
+	// Story 2-13: cache write — latest retry tier for last_retry_tier snapshot field.
+	// D3 (party-mode): flip the sentinel so the snapshot can distinguish a real
+	// tier transition from the default-init T3_RETRY_TIER1 value.
+	_lastRetryTier = state;
+	_lastRetryTierEverSet = true;
+
 	// Tier-3 toast: single-instance guard per Dev Notes §tier-3-toast-ux.
 	// Do not re-emit if a toast is already visible for this session.
 	if (state == T3_RETRY_TIER3 && !_tier3ToastVisible) {
@@ -791,6 +803,8 @@ int ConnectionTeleproto3::computeReconnectDelayMs() {
 		const auto rc = t3_silent_close_delay_sample_ns(_t3session, &sampledNs);
 		if (rc == T3_OK) {
 			silentNs = sampledNs;
+			// Story 2-13: cache write — last successful silent-close sample.
+			_lastSilentCloseSampleNs = static_cast<std::int64_t>(sampledNs);
 		} else {
 			// Non-T3_OK: default to 125 ms; do NOT abort (story 2.6 Dev Notes §NFR25).
 			// Common cause: T3_ERR_INVALID_ARG when callbacks not yet bound (t3_session_bind_callbacks not called).
@@ -820,6 +834,76 @@ void ConnectionTeleproto3::emitDiscoMarker(
 		.arg(wsClose)
 		.arg(transportErr)
 		.arg(tier));
+}
+
+// Story 2-13: populate Type3-specific snapshot fields for the [T3-keepalive]
+// block. Session-bound cryptographic fields (`obf_send_counter`,
+// `obf_recv_counter`, `last_silent_close_ns`) are gated on _t3session != nullptr
+// per AC4 (amended after D2 party-mode resolution). Per-Connection cache fields
+// (`last_retry_tier`) emit unconditionally, gated by their own `*EverSet`
+// sentinel per D3 — render `-` until the field has actually been written.
+// CTRState carries no explicit `.counter` field; the AES-CTR block counter is
+// recovered from the last 8 bytes of `ivec` interpreted big-endian (monotonic
+// with bytes processed within a single session — initial bias from KDF).
+AbstractConnection::KeepaliveSnapshot
+ConnectionTeleproto3::collectKeepaliveSnapshot() const {
+	KeepaliveSnapshot snap;
+
+	snap.backoff_step_ms = _backoffStepMs;
+	snap.status = [&]() -> QString {
+		switch (_status) {
+		case Status::Waiting:     return u"Waiting"_q;
+		case Status::Connecting:  return u"Connecting"_q;
+		case Status::Negotiating: return u"Negotiating"_q;
+		case Status::Ready:       return u"Ready"_q;
+		case Status::Finished:    return u"Finished"_q;
+		}
+		return u"-"_q;
+	}();
+	snap.pending_queue_size = static_cast<int>(_pendingQueue.size());
+	snap.pending_queue_bytes = _pendingQueueBytes;
+
+	// D2: per-Connection cache, emit unconditionally with D3 sentinel gate.
+	if (_lastRetryTierEverSet) {
+		snap.last_retry_tier = [&]() -> int {
+			switch (_lastRetryTier) {
+			case T3_RETRY_OK:    return 0;
+			case T3_RETRY_TIER1: return 1;
+			case T3_RETRY_TIER2: return 2;
+			case T3_RETRY_TIER3: return 3;
+			default:             return -1;
+			}
+		}();
+	}
+
+	if (_t3session) {
+		const auto blockCounter = [](const CTRState &s) -> std::uint64_t {
+			std::uint64_t c = 0;
+			for (int i = 8; i < 16; ++i) {
+				c = (c << 8) | static_cast<std::uint64_t>(s.ivec[i]);
+			}
+			return c;
+		};
+		snap.obf_send_counter = blockCounter(_obfSendState);
+		snap.obf_recv_counter = blockCounter(_obfRecvState);
+		if (_lastSilentCloseSampleNs >= 0) {
+			snap.last_silent_close_ns = _lastSilentCloseSampleNs;
+		}
+	}
+
+	// P12 (party-mode): clamp deltas to >=0 — defensive against clock anomaly
+	// (long sleep, clock-jump). crl::time is signed; underflow renders absurd
+	// 19-digit values that mislead operator triage.
+	if (_connectToServerAtMs > 0) {
+		snap.ms_since_connect = std::max<crl::time>(
+			0, crl::now() - _connectToServerAtMs);
+	}
+	if (_lastBinaryRecvAtMs > 0) {
+		snap.ms_since_binary_recv = std::max<crl::time>(
+			0, crl::now() - _lastBinaryRecvAtMs);
+	}
+
+	return snap;
 }
 
 } // namespace details

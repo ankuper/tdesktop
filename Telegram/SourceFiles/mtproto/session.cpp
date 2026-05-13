@@ -242,9 +242,15 @@ void Session::refreshOptions() {
 	const auto isEnabled = settings.isEnabled();
 	const auto proxyType = (isEnabled ? proxy.type : ProxyData::Type::None);
 	const auto useTcp = (proxyType != ProxyData::Type::Http);
-	const auto useHttp = (proxyType != ProxyData::Type::Mtproto);
+	const auto useHttp = (proxyType != ProxyData::Type::Mtproto
+		&& proxyType != ProxyData::Type::Mtproto3);
 	const auto useIPv4 = true;
 	const auto useIPv6 = settings.tryIPv6();
+	fprintf(stderr, "[T3-session] refreshOptions: enabled=%d type=%d host=%s port=%d\n",
+		isEnabled ? 1 : 0,
+		static_cast<int>(proxyType),
+		proxy.host.toLatin1().constData(),
+		proxy.port);
 	_data->setOptions(SessionOptions(
 		_instance->systemLangCode(),
 		_instance->cloudLangCode(),

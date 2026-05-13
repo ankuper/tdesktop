@@ -1,3 +1,9 @@
+v2-LAUNCH (DATE-TBD)
+
+- Type3 connection management: the client never silently switches endpoints (explicit-switch-only contract, FR22). When the connection degrades to tier 3, a non-modal prompt appears — tapping it opens the server-selection screen so you can switch or fall back to a direct connection on your own terms.
+- Tier-1 and tier-2 degradation is signalled via the connection-quality indicator (C1); no automatic rerouting occurs at any tier.
+- See tdesktop/docs/updates-linux.md, updates-windows.md, updates-macos.md for platform-specific release detail.
+
 6.9.3 (12.06.26)
 
 - Fix possible crash in formula parsing.

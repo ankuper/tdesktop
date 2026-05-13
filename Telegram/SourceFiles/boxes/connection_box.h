@@ -7,11 +7,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+#include <optional>
+#include <memory>
+
 #include "base/timer.h"
 #include "base/object_ptr.h"
 #include "core/core_settings_proxy.h"
 #include "mtproto/connection_abstract.h"
 #include "mtproto/mtproto_proxy_data.h"
+
+namespace Tdesktop::Teleproto3 {
+class IndicatorC1;
+} // namespace Tdesktop::Teleproto3
 
 namespace Ui {
 class Show;
@@ -92,6 +99,25 @@ public:
 
 	[[nodiscard]] bool contains(const ProxyData &proxy) const;
 	void addNewItem(const ProxyData &proxy);
+
+	// FR9 same-key match helpers (story 2-2; AC-2).
+	// Returns the item id of the first Mtproto3 entry whose 16 raw key
+	// octets match proxy, or std::nullopt if none found.
+	[[nodiscard]] auto findByType3Key(const ProxyData &proxy) const
+		-> std::optional<int>;
+	// Mutates the entry with the given id to updated in place (FR9 update
+	// path). No-op if the entry is already identical or not found.
+	void replaceType3InPlace(int id, const ProxyData &updated);
+
+	// Story 2.5 Subtask 7.2 — factory for the persistent chat-list C1 indicator.
+	// Creates an IndicatorC1 widget owned by `parent` that tracks the currently
+	// selected Mtproto3 proxy's connection state via the views() event stream.
+	// Returns nullptr if the active proxy is not Mtproto3.
+	// The main window (or status-bar widget) calls this once at session start.
+	// Forward-citation: the caller site (main window / status bar) is wired by
+	// story 2.6 / 2.10 — the factory API is established here (story 2.5 boundary).
+	[[nodiscard]] std::unique_ptr<Tdesktop::Teleproto3::IndicatorC1>
+		createActiveC1Indicator(QWidget *parent);
 
 	rpl::producer<ItemView> views() const;
 

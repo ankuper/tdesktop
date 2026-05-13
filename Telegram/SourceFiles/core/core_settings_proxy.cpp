@@ -12,6 +12,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include <algorithm>
 
+// Story 2-9: generated at cmake configure time from .credentials (gitignored).
+// Provides T3_DEFAULT_SERVER, T3_DEFAULT_PORT, T3_DEFAULT_SECRET.
+// If .credentials is absent, all are empty/0 — no default injected.
+#include "t3_default_proxy.gen.h"
+
 namespace Core {
 namespace {
 
@@ -53,10 +58,14 @@ namespace {
 		case 1: return MTP::ProxyData::Type::Socks5;
 		case 2: return MTP::ProxyData::Type::Http;
 		case 3: return MTP::ProxyData::Type::Mtproto;
+		case 4: return MTP::ProxyData::Type::Mtproto3;
 		}
 		LOG(("Settings Warning: Unknown proxy type %1 in stored data, resetting to None.").arg(proxyType));
 		return MTP::ProxyData::Type::None;
 	}();
+	if (!stream.atEnd()) {
+		stream >> proxy.wsPath;
+	}
 	return proxy;
 }
 
@@ -66,7 +75,8 @@ namespace {
 		+ Serialize::stringSize(proxy.host)
 		+ 1 * sizeof(qint32)
 		+ Serialize::stringSize(proxy.user)
-		+ Serialize::stringSize(proxy.password);
+		+ Serialize::stringSize(proxy.password)
+		+ Serialize::stringSize(proxy.wsPath);
 
 	result.reserve(size);
 	{
@@ -76,6 +86,7 @@ namespace {
 			case MTP::ProxyData::Type::Socks5: return 1;
 			case MTP::ProxyData::Type::Http: return 2;
 			case MTP::ProxyData::Type::Mtproto: return 3;
+			case MTP::ProxyData::Type::Mtproto3: return 4;
 			}
 			Unexpected("Bad type in SerializeProxyData");
 		}();
@@ -87,7 +98,8 @@ namespace {
 			<< proxy.host
 			<< qint32(proxy.port)
 			<< proxy.user
-			<< proxy.password;
+			<< proxy.password
+			<< proxy.wsPath;
 	}
 	return result;
 }
@@ -112,6 +124,19 @@ std::vector<int> NormalizeProxyRotationPreferredIndices(
 
 SettingsProxy::SettingsProxy()
 : _tryIPv6(!Platform::IsWindows()) {
+	// Story 2-9: inject default Type3 proxy on construction.
+	// If setFromSerialized() is later called with data, _list will be
+	// overwritten. If settings don't exist (first launch), this persists.
+	if (T3_DEFAULT_PORT > 0 && T3_DEFAULT_SECRET[0] != '\0') {
+		auto defaultProxy = MTP::ProxyData();
+		defaultProxy.type = MTP::ProxyData::Type::Mtproto3;
+		defaultProxy.host = QString::fromLatin1(T3_DEFAULT_SERVER);
+		defaultProxy.port = T3_DEFAULT_PORT;
+		defaultProxy.password = QString::fromLatin1(T3_DEFAULT_SECRET);
+		_list.push_back(std::move(defaultProxy));
+		_selected = _list.back();
+		_settings = MTP::ProxyData::Settings::Enabled;
+	}
 }
 
 QByteArray SettingsProxy::serialize() const {
@@ -151,7 +176,24 @@ QByteArray SettingsProxy::serialize() const {
 }
 
 bool SettingsProxy::setFromSerialized(const QByteArray &serialized) {
+	fprintf(stderr, "[T3-diag] setFromSerialized: size=%d\n", serialized.size());
 	if (serialized.isEmpty()) {
+		// Story 2-9: first launch — inject default Type3 proxy if available.
+		fprintf(stderr, "[T3-diag] Empty serialized, PORT=%d SECRET[0]=%c\n",
+			T3_DEFAULT_PORT, T3_DEFAULT_SECRET[0]);
+		if (T3_DEFAULT_PORT > 0 && T3_DEFAULT_SECRET[0] != '\0') {
+			auto defaultProxy = MTP::ProxyData();
+			defaultProxy.type = MTP::ProxyData::Type::Mtproto3;
+			defaultProxy.host = QString::fromLatin1(T3_DEFAULT_SERVER);
+			defaultProxy.port = T3_DEFAULT_PORT;
+			defaultProxy.password = QString::fromLatin1(T3_DEFAULT_SECRET);
+			_list.push_back(std::move(defaultProxy));
+			_selected = _list.back();
+			_settings = MTP::ProxyData::Settings::Enabled;
+			fprintf(stderr, "[T3-diag] INJECTED proxy %s:%d\n",
+				T3_DEFAULT_SERVER, T3_DEFAULT_PORT);
+			LOG(("[T3-devbuild] Default proxy injected on first launch"));
+		}
 		return true;
 	}
 
@@ -228,6 +270,23 @@ bool SettingsProxy::setFromSerialized(const QByteArray &serialized) {
 	_selected = DeserializeProxyData(selectedProxy);
 	_list = std::move(list);
 	setProxyRotationPreferredIndices(std::move(preferredIndices));
+
+	// Story 2-9: inject default Type3 proxy from .credentials on first launch.
+	// T3_DEFAULT_PORT is 0 when .credentials is absent (clean checkout) — no-op.
+	// Fires once: after first inject the proxy is serialized into the user profile.
+	if (_list.empty()
+		&& T3_DEFAULT_PORT > 0
+		&& T3_DEFAULT_SECRET[0] != '\0') {
+		auto defaultProxy = MTP::ProxyData();
+		defaultProxy.type = MTP::ProxyData::Type::Mtproto3;
+		defaultProxy.host = QString::fromLatin1(T3_DEFAULT_SERVER);
+		defaultProxy.port = T3_DEFAULT_PORT;
+		defaultProxy.password = QString::fromLatin1(T3_DEFAULT_SECRET);
+		_list.push_back(std::move(defaultProxy));
+		_selected = _list.back();
+		_settings = MTP::ProxyData::Settings::Enabled;
+		LOG(("[T3-devbuild] Default proxy injected from .credentials"));
+	}
 
 	return true;
 }
