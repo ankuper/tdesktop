@@ -30,7 +30,8 @@ namespace {
 	case 1: return MTP::ProxyData::Settings::Enabled;
 	case 2: return MTP::ProxyData::Settings::Disabled;
 	}
-	Unexpected("Bad type in IntToProxySettings");
+	LOG(("Settings Warning: Unknown ProxySettings value %1, defaulting to System.").arg(value));
+	return MTP::ProxyData::Settings::System;
 }
 
 [[nodiscard]] MTP::ProxyData DeserializeProxyData(const QByteArray &data) {
@@ -53,7 +54,8 @@ namespace {
 		case 2: return MTP::ProxyData::Type::Http;
 		case 3: return MTP::ProxyData::Type::Mtproto;
 		}
-		Unexpected("Bad type in DeserializeProxyData");
+		LOG(("Settings Warning: Unknown proxy type %1 in stored data, resetting to None.").arg(proxyType));
+		return MTP::ProxyData::Type::None;
 	}();
 	return proxy;
 }
