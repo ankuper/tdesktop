@@ -230,7 +230,6 @@ jobs:
           cd %TBUILD%\%REPO_NAME%\Telegram
 
           call configure.bat ^
-            x64 ^
             qt6 ^
             -G "Ninja Multi-Config" ^
             -D CMAKE_CONFIGURATION_TYPES=Release ^
