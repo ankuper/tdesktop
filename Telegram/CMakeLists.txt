@@ -21,11 +21,21 @@ add_subdirectory(lib_webrtc)
 add_subdirectory(lib_webview)
 add_subdirectory(codegen)
 
+# libteleproto3 source-tree location. Default is workspace-sibling layout
+# (`${CMAKE_SOURCE_DIR}/../../teleproto3`); CI overrides via -DLIBTELEPROTO3_ROOT=...
+# when the checkout uses a different layout (Linux docker mount, Windows CI mklink, etc.).
+# Defined here (rather than further down at line ~86) so the Type3 codegen rule below
+# can use the same path.
+set(LIBTELEPROTO3_ROOT
+    "${CMAKE_SOURCE_DIR}/../../teleproto3"
+    CACHE PATH "Root of the libteleproto3 source tree"
+)
+
 # ── Story 2.6: Type3 UI-string codegen ───────────────────────────────────────
 # Reads teleproto3/spec/ux-strings.yaml and patches the <type3-strings:begin/>
 # sentinel block in lang_keys.h.  Runs only when ux-strings.yaml changes.
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
-set(_t3_yaml  "${CMAKE_SOURCE_DIR}/../../teleproto3/spec/ux-strings.yaml")
+set(_t3_yaml  "${LIBTELEPROTO3_ROOT}/spec/ux-strings.yaml")
 set(_t3_hdr   "${CMAKE_CURRENT_SOURCE_DIR}/SourceFiles/lang/lang_keys.h")
 set(_t3_stamp "${CMAKE_CURRENT_BINARY_DIR}/lang_keys_t3.stamp")
 add_custom_command(
@@ -78,15 +88,9 @@ set_target_properties(Telegram PROPERTIES AUTOMOC ON)
 
 # libteleproto3 — statically imported (Epic 2 story 2.1; anti-pattern §12.10).
 # Built upstream by teleproto3/lib/build/Makefile (Epic 1 output).
+# LIBTELEPROTO3_ROOT is declared earlier (above the Type3 codegen rule) so both
+# the codegen and the static-lib import resolve to the same source tree.
 #
-# LIBTELEPROTO3_ROOT is the root of the libteleproto3 source tree. By default
-# it points at the workspace-sibling `teleproto3/` directory (two levels up
-# from this CMake source root, which is `tdesktop/tdesktop/Telegram`). Override
-# via -DLIBTELEPROTO3_ROOT=... if your checkout uses a different layout.
-set(LIBTELEPROTO3_ROOT
-    "${CMAKE_SOURCE_DIR}/../../teleproto3"
-    CACHE PATH "Root of the libteleproto3 source tree"
-)
 # Story 2-9 (macOS dev-build): LIBTELEPROTO3_LIB_PATH can be overridden to point
 # at the macOS cmake-build output (cmake-build/libteleproto3.a) instead of the
 # Linux Makefile build output (build/libteleproto3.a).  Override via:
