@@ -81,8 +81,8 @@ jobs:
 
       - name: Build tdesktop AppDir (host build)
         env:
-          TDESKTOP_API_ID: ${{ secrets.TDESKTOP_API_ID }}
-          TDESKTOP_API_HASH: ${{ secrets.TDESKTOP_API_HASH }}
+          TDESKTOP_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TDESKTOP_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
         run: |
           # Host-build path — invokes the centos_env build via docker
           # if available, else falls back to host cmake + ninja with
