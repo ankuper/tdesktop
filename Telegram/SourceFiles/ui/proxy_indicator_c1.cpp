@@ -12,7 +12,9 @@
 
 // ABI version-pin (Epic 2 style-guide §3; defence-in-depth alongside teleproto3_bridge.cpp).
 // Catches ABI drift at compile time if libteleproto3 is updated without updating this TU.
-_Static_assert(
+// static_assert (not _Static_assert): this TU is C++, and MSVC's C++ frontend
+// doesn't accept the C11 keyword (GCC/Clang accept it as an extension).
+static_assert(
 	T3_ABI_VERSION_MAJOR == 0
 	&& T3_ABI_VERSION_MINOR == 1
 	&& T3_ABI_VERSION_PATCH == 2,
