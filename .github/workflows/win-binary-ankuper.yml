@@ -224,8 +224,8 @@ jobs:
       - name: Telegram Desktop build.
         if: env.ONLY_CACHE == 'false'
         env:
-          TDESKTOP_API_ID: ${{ secrets.TDESKTOP_API_ID }}
-          TDESKTOP_API_HASH: ${{ secrets.TDESKTOP_API_HASH }}
+          TDESKTOP_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TDESKTOP_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
         run: |
           cd %TBUILD%\%REPO_NAME%\Telegram
 
