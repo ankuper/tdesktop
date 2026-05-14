@@ -99,8 +99,8 @@ jobs:
 
       - name: Telegram Desktop build (Release).
         env:
-          TDESKTOP_API_ID: ${{ secrets.TDESKTOP_API_ID }}
-          TDESKTOP_API_HASH: ${{ secrets.TDESKTOP_API_HASH }}
+          TDESKTOP_API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          TDESKTOP_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
         run: |
           if [ -z "$TDESKTOP_API_ID" ] || [ -z "$TDESKTOP_API_HASH" ]; then
             echo "FAIL: TDESKTOP_API_ID / TDESKTOP_API_HASH secrets are not set on the repo."
