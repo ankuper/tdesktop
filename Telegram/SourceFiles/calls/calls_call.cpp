@@ -1177,11 +1177,14 @@ void Call::createAndStartController(const MTPDphoneCall &call) {
 				// P11: guard the Mtproto3 arm of this assert behind the build flag
 				// — in TDESKTOP_TYPE3_CALLS=OFF builds the enum value still exists
 				// but treating it as SOCKS5 below leaks plaintext through the wrong path.
-				Assert(selected.type == ProxyData::Type::Socks5
+				// Note: MSVC doesn't accept #if inside macro arguments (C++ std);
+				// split the Assert into two #if-gated forms instead.
 #if TDESKTOP_TYPE3_CALLS
-					|| selected.type == ProxyData::Type::Mtproto3
+				Assert(selected.type == ProxyData::Type::Socks5
+					|| selected.type == ProxyData::Type::Mtproto3);
+#else
+				Assert(selected.type == ProxyData::Type::Socks5);
 #endif
-					);
 #if TDESKTOP_TYPE3_CALLS
 				if (selected.type == ProxyData::Type::Mtproto3) {
 					// Story 9-1: spawn localhost SOCKS5/CONNECT shim and route tgcalls through it.
