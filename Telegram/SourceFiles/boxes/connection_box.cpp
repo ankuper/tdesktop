@@ -1582,6 +1582,7 @@ ProxyData ProxyBox::collectData() {
 void ProxyBox::setupTypes() {
 	const auto types = std::vector<std::pair<Type, QString>>{
 		{ Type::Mtproto, u"MTPROTO"_q },
+		{ Type::Mtproto3, u"MTPROTO3"_q },
 		{ Type::Socks5, u"SOCKS5"_q },
 		{ Type::Http, u"HTTP"_q },
 	};
