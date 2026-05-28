@@ -1,0 +1,2 @@
+Author Name author@example.com Author Name author@example.com
+Commit message with metaword in it

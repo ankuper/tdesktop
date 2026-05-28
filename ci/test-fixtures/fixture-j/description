@@ -1,0 +1,1 @@
+merge-base correctness: merge-base recomputes correctly across rebases; audit covers full HEAD-range, not just newly-pushed commits

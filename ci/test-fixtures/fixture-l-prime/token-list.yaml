@@ -1,0 +1,15 @@
+---
+denylist:
+  - id: rule-l1
+    pattern: 'token-alpha'
+    description: 'First test rule'
+    scope: both
+  - id: rule-l2
+    pattern: 'token-beta'
+    description: 'Second test rule'
+    scope: both
+  - id: rule-l3
+    pattern: 'token-gamma'
+    description: 'Third test rule'
+    scope: both
+allowlist:

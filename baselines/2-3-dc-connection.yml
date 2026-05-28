@@ -1,0 +1,45 @@
+---
+story: "2.3"
+last_updated: 2026-05-01
+methodology: aggregate-only-no-per-event-raw  # Epic 2 §9
+notes: |
+  Epic 1 §12 TOST/Spearman invariants do not apply.
+  Client measures latency budgets (NFR7, NFR2) and delivery rate (NFR24),
+  not timing-uniformity invariants.
+  NFR7 and NFR2 values below are from the loopback mock (framing-only overhead);
+  real DC round-trip latency (including network) is gated by story 2-10 e2e test.
+  NFR24 values are populated by the weekly soak CI run (first run pending).
+---
+
+# NFR7 — DC resume latency (AC1)
+nfr7:
+  resume_p50_ms: 0      # loopback framing round-trip (sub-millisecond); real DC gate → story 2-10
+  resume_p95_ms: 0      # loopback framing round-trip (sub-millisecond); real DC gate → story 2-10
+  thresholds:
+    p50_max_ms: 5000
+    p95_max_ms: 15000
+
+# NFR2 — Type3 additional latency over Type2 (AC4)
+nfr2:
+  t3_over_t2_p50_ms: 0  # loopback framing overhead (sub-millisecond)
+  t3_over_t2_p99_ms: 0  # loopback framing overhead (sub-millisecond)
+  thresholds:
+    p50_max_ms: 100
+    p99_max_ms: 250
+  samples: 1000
+  bench: "toxeh/teleproto3-bench"
+
+# NFR24 — 24-hour delivery success rate (AC5)
+nfr24:
+  delivery_success_rate: ~    # populated by weekly CI soak run (test-teleproto3-soak)
+  messages_total: ~           # populated by weekly CI soak run
+  run_duration_h: 24
+  last_run_utc: ~             # populated by weekly CI soak run
+  thresholds:
+    rate_min: 0.995           # DO NOT auto-relax on flaky runs
+
+# NFR25 — Backoff schedule (AC2)
+nfr25:
+  backoff_initial_ms: 1000
+  backoff_cap_ms: 60000
+  schedule: exp_doubling

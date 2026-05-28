@@ -1,0 +1,7 @@
+---
+denylist:
+  - id: meta-only
+    pattern: 'metaword'
+    description: 'Test commit-metadata scope'
+    scope: commit-metadata
+allowlist:

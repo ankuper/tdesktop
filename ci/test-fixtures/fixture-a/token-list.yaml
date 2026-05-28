@@ -1,0 +1,7 @@
+---
+denylist:
+  - id: test-1
+    pattern: 'forbiddenword'
+    description: 'Test denylist rule'
+    scope: both
+allowlist:
