@@ -119,10 +119,7 @@ set_target_properties(teleproto3 PROPERTIES
     INTERFACE_INCLUDE_DIRECTORIES    "${LIBTELEPROTO3_INCLUDE_DIR}"
 )
 
-# Story 2-9: Generate t3_default_proxy.gen.h from .credentials (gitignored).
-# The header lands in CMAKE_CURRENT_BINARY_DIR — never in the source tree.
-include(${CMAKE_CURRENT_SOURCE_DIR}/generate_default_proxy.cmake)
-target_include_directories(Telegram PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/gen)
+
 
 # Link teleproto3 to td_mtproto so that mtproto_proxy_data.cpp can find t3.h
 target_link_libraries(td_mtproto PUBLIC teleproto3)
