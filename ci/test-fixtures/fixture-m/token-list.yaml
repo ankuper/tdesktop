@@ -1,0 +1,7 @@
+---
+denylist:
+  - id: m-rule
+    pattern: 'testtoken'
+    description: 'Test rule'
+    scope: both
+allowlist:

@@ -16,8 +16,8 @@
 // doesn't accept the C11 keyword (GCC/Clang accept it as an extension).
 static_assert(
 	T3_ABI_VERSION_MAJOR == 0
-	&& T3_ABI_VERSION_MINOR == 1
-	&& T3_ABI_VERSION_PATCH == 2,
+	&& T3_ABI_VERSION_MINOR == 2
+	&& T3_ABI_VERSION_PATCH == 0,
 	"libteleproto3 ABI mismatch — update proxy_indicator_c1.cpp to new ABI");
 
 #include <QtCore/QFile>

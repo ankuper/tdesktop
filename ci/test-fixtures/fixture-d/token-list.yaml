@@ -1,0 +1,6 @@
+---
+denylist:
+  - id: broken-rule
+    description: 'Missing pattern field — malformed'
+    scope: both
+allowlist:

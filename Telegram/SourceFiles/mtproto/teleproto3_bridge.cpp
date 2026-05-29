@@ -13,13 +13,11 @@
 
 #include "mtproto/teleproto3_bridge.h"
 
-// ABI version-pin: updated to lib-v0.1.2 by Story 9-1 (Epic 9 calls integration).
-// lib-v0.1.2 is additive (T3_SHIM_SOCKS5 optional API + t3_features.h); no existing
-// symbol changed. ABI bump §A checklist run 2026-05-10; two consumer pins updated.
+// ABI version-pin: updated to lib-v0.2.0 for T3ChatM branded build.
 static_assert(T3_ABI_VERSION_MAJOR == 0 &&
-              T3_ABI_VERSION_MINOR == 1 &&
-              T3_ABI_VERSION_PATCH == 2,
-              "Bridge expects lib-v0.1.2; rebuild lib or update macros");
+              T3_ABI_VERSION_MINOR == 2 &&
+              T3_ABI_VERSION_PATCH == 0,
+              "Bridge expects lib-v0.2.0; rebuild lib or update macros");
 
 #include <QtNetwork/QAbstractSocket>
 #include <QCoreApplication>

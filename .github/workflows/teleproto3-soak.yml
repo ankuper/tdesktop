@@ -1,0 +1,63 @@
+# Story 2-3: 24-hour Type3 delivery success rate soak test (AC5, NFR24).
+#
+# Runs weekly on a self-hosted runner with network access to the sandbox proxy.
+# Sandbox proxy MUST use:
+#   - A port OTHER THAN 3129 (production port — occupied by v1 mtproxy on 94.156.131.252)
+#   - Test credentials (T3_SOAK_SECRET) distinct from prod credentials
+#
+# On failure: CI marks the run red. DO NOT auto-relax the 99.5% threshold.
+#
+# Permissions per Epic 1 §13.
+name: Type3 24h soak test
+
+on:
+  schedule:
+    - cron: '0 2 * * 1'  # Weekly — every Monday at 02:00 UTC
+  workflow_dispatch:
+    inputs:
+      soak_enabled:
+        description: 'Set to "1" to run the full 24-hour soak'
+        required: false
+        default: '0'
+
+permissions:
+  contents: write
+
+jobs:
+  soak-test:
+    name: 24h delivery success rate (NFR24 ≥ 99.5%)
+    runs-on: self-hosted  # Requires network access to sandbox proxy
+    timeout-minutes: 1500 # 25 hours — soak (24h) + 1h build/teardown margin
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build test-teleproto3-soak
+        run: |
+          cmake -B build -DTELEPROTO3_TESTS=ON -DLIBTELEPROTO3_ROOT=${{ github.workspace }}/../teleproto3
+          cmake --build build --target test-teleproto3-soak -j$(nproc)
+
+      - name: Run 24-hour soak test
+        env:
+          TELEPROTO3_SOAK: '1'
+          # Sandbox proxy credentials (NOT production)
+          T3_SOAK_HOST: ${{ secrets.T3_SOAK_HOST }}
+          T3_SOAK_PORT: ${{ secrets.T3_SOAK_PORT }}
+          T3_SOAK_SECRET: ${{ secrets.T3_SOAK_SECRET }}
+        run: ctest --test-dir build -R test-teleproto3-soak -V --timeout 90000
+
+      - name: Upload baseline artefact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: 2-3-dc-connection-baseline
+          path: baselines/2-3-dc-connection.yml
+          retention-days: 90
+
+      - name: Commit updated baseline (aggregate-only, append-only)
+        if: success()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add baselines/2-3-dc-connection.yml
+          git diff --cached --quiet || git commit -m "chore: update 2-3 soak baseline $(date -u +%Y-%m-%d)"
+          git push

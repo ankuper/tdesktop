@@ -1,0 +1,7 @@
+---
+denylist:
+  - id: merge-test
+    pattern: 'new-content-only'
+    description: 'Should only appear in PR commits not in base'
+    scope: diff
+allowlist:

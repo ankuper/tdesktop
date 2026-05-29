@@ -1,0 +1,42 @@
+# identity-audit-pr.yml — AR-G5 identity-audit gate for public ankuper repos.
+#
+# This is the reference implementation of the Type3 protocol.
+# Normative behaviour is defined in spec/. Where they differ, spec/ wins.
+#
+# Stability: required check on every PR to every public ankuper repo. Story 7-11 AC #4.
+# No path filter — AR-G5 applies to every PR regardless of which files are touched.
+# Defense-in-depth: also runs on push to main as a post-merge safety net.
+
+name: Identity Audit (AR-G5) — tdesktop
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+
+# Minimal permissions: PR comment injection + issue creation for violations.
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+# Serialise concurrent audit runs: keyed on PR number (PR) or branch (push).
+# cancel-in-progress: false — every run must complete to ensure full violation report.
+concurrency:
+  group: identity-audit-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  audit:
+    name: AR-G5 identity audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Run identity audit
+        uses: ./.github/actions/identity-audit
+        with:
+          token-list-secret: ${{ secrets.IDENTITY_AUDIT_TOKEN_LIST_YAML }}

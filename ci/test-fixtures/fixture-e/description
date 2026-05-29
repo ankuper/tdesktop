@@ -1,0 +1,1 @@
+no IDENTITY_AUDIT_TOKEN_LIST env var and empty stdin → exit 2

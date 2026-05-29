@@ -1,0 +1,13 @@
+---
+denylist:
+  - id: deny-k1
+    pattern: 'forbiddenword'
+    description: 'Base denylist rule for overreach test'
+    scope: both
+allowlist:
+  - id: allow-overbroad
+    pattern: 'forbiddenword'
+    description: 'Over-broad: matches both FP and real token — should fail self-test'
+    reason: 'Intentionally overbroad to trigger overreach detection'
+    test_fp_example: 'forbiddenword-allowed-context'
+    test_denylist_token_example: 'forbiddenword'
