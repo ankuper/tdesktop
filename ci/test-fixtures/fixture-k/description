@@ -1,0 +1,1 @@
+allowlist self-test catches over-broad pattern → exit 2 with allowlist-overreach

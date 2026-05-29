@@ -1,0 +1,1 @@
+setup-public-repo.sh exits 3 with FIX_REQUIRED when repo has existing [user] block with real-name token

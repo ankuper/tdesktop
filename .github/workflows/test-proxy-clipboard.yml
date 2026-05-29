@@ -1,0 +1,54 @@
+# Story 2-2 — Task 6: test-proxy-clipboard CI workflow.
+#
+# Builds and runs the test-proxy-clipboard Qt test binary (three fixtures:
+# PasteValidType3CreatesEntry, PasteSameKeyDifferentHostUpdatesInPlace,
+# PasteMalformedRejectsWithoutFallback) against the linked libteleproto3.
+
+name: test-proxy-clipboard
+
+on:
+  pull_request:
+    paths:
+      - 'Telegram/SourceFiles/mtproto/mtproto_proxy_data.cpp'
+      - 'Telegram/SourceFiles/mtproto/mtproto_proxy_data.h'
+      - 'Telegram/SourceFiles/mtproto/teleproto3_bridge.cpp'
+      - 'Telegram/SourceFiles/mtproto/teleproto3_bridge.h'
+      - 'Telegram/SourceFiles/boxes/connection_box.cpp'
+      - 'Telegram/SourceFiles/boxes/connection_box.h'
+      - 'Telegram/SourceFiles/boxes/tests/test_proxy_clipboard.cpp'
+      - 'tests/CMakeLists.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  test-proxy-clipboard:
+    name: Build and run Type3 proxy-clipboard Qt fixtures
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build \
+            qt6-base-dev qt6-websockets-dev libqt6test6 \
+            libssl-dev \
+            pkg-config
+
+      - name: Configure (tests only)
+        run: |
+          cmake -S . -B build-tests \
+            -G Ninja \
+            -DTELEPROTO3_TESTS=ON \
+            -DLIBTELEPROTO3_ROOT=../../teleproto3/lib \
+            -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build test-proxy-clipboard
+        run: cmake --build build-tests --target test-proxy-clipboard
+
+      - name: Run test-proxy-clipboard
+        run: ctest --test-dir build-tests --output-on-failure -R test-proxy-clipboard

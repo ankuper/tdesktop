@@ -1,0 +1,7 @@
+---
+denylist:
+  - id: scan-test
+    pattern: 'secrettoken'
+    description: 'Should only fire on added lines'
+    scope: diff
+allowlist:

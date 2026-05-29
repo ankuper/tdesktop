@@ -1,0 +1,1 @@
+3 rules all match → all 3 in stdout, exit 1 (non-short-circuit)

@@ -1,0 +1,71 @@
+# Story 2-2 — Task 5: UX-DR24 ban-list lint integration.
+#
+# Runs spec-uicopy-banlist.yml (authored by Epic 1 story 1.4) over the diff
+# in this PR, scoped to UI-copy-bearing source files changed by story 2-2.
+#
+# FORWARD-CITATION: teleproto3/spec-uicopy-banlist.yml
+# Status: absent at story-2.2 dev-time (story 1.4 not yet merged).
+# This workflow is wired but the `uses:` path below is a forward-reference.
+# Once story 1.4 is merged the marker comment must be removed and the
+# `if: false` guard below must be deleted.
+
+name: tdesktop UI-copy ban-list lint
+
+on:
+  pull_request:
+    paths:
+      - 'Telegram/SourceFiles/lang/**'
+      - 'Telegram/SourceFiles/boxes/connection_box.cpp'
+      - 'Telegram/SourceFiles/boxes/connection_box.h'
+      - 'Telegram/SourceFiles/mtproto/mtproto_proxy_data.cpp'
+      - 'Telegram/SourceFiles/mtproto/mtproto_proxy_data.h'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  banlist-lint:
+    name: Run UX-DR24 ban-list over changed UI-copy files
+    runs-on: ubuntu-latest
+    # FORWARD-CITATION guard: remove the `if: false` line once story 1.4 is merged
+    # and teleproto3/spec-uicopy-banlist.yml is available at the path below.
+    if: false  # forward-citation, story 1.4 — remove when spec-uicopy-banlist.yml lands
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch PR diff
+        run: |
+          git diff origin/${{ github.base_ref }}...HEAD -- \
+            Telegram/SourceFiles/lang/ \
+            Telegram/SourceFiles/boxes/connection_box.cpp \
+            Telegram/SourceFiles/boxes/connection_box.h \
+            Telegram/SourceFiles/mtproto/mtproto_proxy_data.cpp \
+            Telegram/SourceFiles/mtproto/mtproto_proxy_data.h \
+            > /tmp/story-2-2-diff.txt
+
+      - name: Checkout teleproto3 spec (ban-list source)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/teleproto3
+          path: teleproto3-spec
+          sparse-checkout: spec/spec-uicopy-banlist.yml
+
+      # FORWARD-CITATION: teleproto3/spec/spec-uicopy-banlist.yml
+      # The step below will fail until story 1.4 is merged and the file exists.
+      # NOTE: the ban-list runner script name/format is TBD — story 1.4
+      # determines whether it ships as .py, .sh, or composite action.
+      # Update this step once story 1.4 lands.
+      - name: Run ban-list lint
+        run: |
+          if [ -f teleproto3-spec/spec/run-uicopy-banlist.py ]; then
+            python3 teleproto3-spec/spec/run-uicopy-banlist.py \
+              --diff /tmp/story-2-2-diff.txt \
+              --annotate-pr
+          else
+            echo "SKIP: ban-list runner not yet available (story 1.4)"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,1 @@
+scope=commit-metadata fires on commit metadata, diff clean → exit 1

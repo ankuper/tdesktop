@@ -1,0 +1,7 @@
+---
+denylist:
+  - id: both-test
+    pattern: 'bothword'
+    description: 'Test both scope'
+    scope: both
+allowlist:

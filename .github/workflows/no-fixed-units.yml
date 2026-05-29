@@ -1,0 +1,61 @@
+# Story 2-2 — Task 7: UX-DR25/DR27 typography-token enforcement.
+#
+# Rejects any diff that introduces hard-coded pt/px/dp/em size literals
+# (anti-pattern §12.8). All spacing and sizing must use st::* tokens from
+# the existing tdesktop style system.
+
+name: No fixed size units
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  no-fixed-units:
+    name: Reject hard-coded pt/px/dp/em literals
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check diff for fixed-unit literals
+        run: |
+          # Collect added lines from the diff (lines starting with '+' excluding diff headers)
+          # Strip comment lines (// and /* ... */) to reduce false positives.
+          git diff origin/${{ github.base_ref }}...HEAD -- \
+            '*.cpp' '*.h' '*.style' '*.qml' \
+            | grep '^+' \
+            | grep -v '^+++' \
+            | grep -v '^\+\s*//' \
+            | grep -v '^\+\s*/\*' \
+            | grep -v '^\+\s*\*' \
+            > /tmp/added-lines.txt || true
+
+          if grep -P '\b\d+(\.\d+)?\s*(pt|px|dp|em)\b' /tmp/added-lines.txt; then
+            echo "ERROR: diff introduces hard-coded pt/px/dp/em size literals."
+            echo "Use st::* tokens from the tdesktop style system instead."
+            echo "Reference: Epic 2 style-guide §12.8 (anti-pattern: hard-coded units)"
+            exit 1
+          fi
+
+          echo "PASS: no hard-coded unit literals found in diff."
+
+      - name: Check diff for bundled fonts
+        run: |
+          git diff origin/${{ github.base_ref }}...HEAD -- \
+            '*.cpp' '*.h' '*.qml' '*.json' '*.ts' \
+            | grep '^+' \
+            | grep -v '^+++' \
+            > /tmp/added-font-lines.txt || true
+
+          if grep -iP 'Libertinus|libertinus|IBM Plex|ibmplex' /tmp/added-font-lines.txt; then
+            echo "ERROR: diff references a bundled font (Libertinus/IBM Plex)."
+            echo "Host-app fonts must be used; client-bundled fonts are forbidden."
+            echo "Reference: Epic 2 style-guide §12.6 (anti-pattern: bundled font)"
+            exit 1
+          fi
+
+          echo "PASS: no bundled font references found in diff."

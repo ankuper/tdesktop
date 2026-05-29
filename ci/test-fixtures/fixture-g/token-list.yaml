@@ -1,0 +1,7 @@
+---
+denylist:
+  - id: diff-only
+    pattern: 'diffword'
+    description: 'Test diff scope'
+    scope: diff
+allowlist:
