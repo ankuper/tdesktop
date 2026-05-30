@@ -326,9 +326,11 @@ void Application::run() {
 	DEBUG_LOG(("Application Info: inited..."));
 
 	DEBUG_LOG(("Application Info: starting app..."));
+/* === TYPE3-PROXY BEGIN === */
 #if TDESKTOP_TYPE3_CALLS
 	LOG(("[T3-dogfood] This build routes voice/video calls through an experimental tunnel. Do not distribute. ≤5 self-test users only."));
 #endif
+/* === TYPE3-PROXY END === */
 
 	// Create mime database, so it won't be slow later.
 	QMimeDatabase().mimeTypeForName(u"text/plain"_q);

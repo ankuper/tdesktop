@@ -21,6 +21,7 @@ add_subdirectory(lib_webrtc)
 add_subdirectory(lib_webview)
 add_subdirectory(codegen)
 
+# === TYPE3-PROXY BEGIN ===
 # libteleproto3 source-tree location. Default is workspace-sibling layout
 # (`${CMAKE_SOURCE_DIR}/../../teleproto3`); CI overrides via -DLIBTELEPROTO3_ROOT=...
 # when the checkout uses a different layout (Linux docker mount, Windows CI mklink, etc.).
@@ -53,6 +54,7 @@ add_custom_target(lang_keys_t3 ALL DEPENDS "${_t3_stamp}")
 # Telegram target must wait for codegen before compiling any TU that includes lang_keys.h.
 add_dependencies(Telegram lang_keys_t3)
 # ─────────────────────────────────────────────────────────────────────────────
+# === TYPE3-PROXY END ===
 
 get_filename_component(src_loc SourceFiles REALPATH)
 get_filename_component(res_loc Resources REALPATH)
@@ -86,6 +88,7 @@ endif()
 
 set_target_properties(Telegram PROPERTIES AUTOMOC ON)
 
+# === TYPE3-PROXY BEGIN ===
 # libteleproto3 — statically imported (Epic 2 story 2.1; anti-pattern §12.10).
 # Built upstream by teleproto3/lib/build/Makefile (Epic 1 output).
 # LIBTELEPROTO3_ROOT is declared earlier (above the Type3 codegen rule) so both
@@ -145,6 +148,7 @@ if (TDESKTOP_TYPE3_CALLS)
 else()
     set(T3_CALLS_DOGFOOD_PLIST_FRAGMENT "")
 endif()
+# === TYPE3-PROXY END ===
 
 target_link_libraries(Telegram
 PRIVATE

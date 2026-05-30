@@ -169,6 +169,7 @@ ProxyData::Status ProxyData::status() const {
 		return Status::Invalid;
 	} else if (type == Type::Mtproto) {
 		return MtprotoPasswordStatus(password);
+	/* === TYPE3-PROXY BEGIN === */
 	} else if (type == Type::Mtproto3) {
 		const auto raw = DecodeProxyPassword(password);
 		if (raw.size() < 18
@@ -194,9 +195,11 @@ ProxyData::Status ProxyData::status() const {
 		}
 		return Status::Valid;
 	}
+	/* === TYPE3-PROXY END === */
 	return Status::Valid;
 }
 
+/* === TYPE3-PROXY BEGIN === */
 bool ProxyData::supportsCalls() const {
 #if TDESKTOP_TYPE3_CALLS
 	// P9: every field must be present before this returns true — caller in
@@ -210,6 +213,7 @@ bool ProxyData::supportsCalls() const {
 	return false;
 #endif
 }
+/* === TYPE3-PROXY END === */
 
 bool ProxyData::tryCustomResolve() const {
 	static const auto RegExp = QRegularExpression(
@@ -233,6 +237,7 @@ bytes::vector ProxyData::secretFromMtprotoPassword() const {
 	return {};
 }
 
+/* === TYPE3-PROXY BEGIN === */
 bytes::vector ProxyData::secretFromType3Password() const {
 	Expects(type == Type::Mtproto3);
 
@@ -292,6 +297,7 @@ bool ProxyData::sameType3Key(const ProxyData &other) const {
 	OPENSSL_cleanse(otherKey.data(), 16);
 	return equal;
 }
+/* === TYPE3-PROXY END === */
 
 ProxyData::operator bool() const {
 	return valid();
@@ -359,6 +365,7 @@ QNetworkProxy ToNetworkProxy(const ProxyData &proxy) {
 		proxy.password);
 }
 
+/* === TYPE3-PROXY BEGIN === */
 // EXTEND from story 2.4 — write-authority owned by story 2.2.
 // At app startup (before any UI), call IsType3SecureStorageReady().
 // If false, the client MUST refuse to start, surface lng_t3_secure_storage_unavailable,
@@ -392,5 +399,6 @@ bytes::vector LoadType3SecretKey(const QString &account) {
 	const auto qkey = Tdesktop::Teleproto3::SecureStore::load(account);
 	return bytes::make_vector(bytes::make_span(qkey));
 }
+/* === TYPE3-PROXY END === */
 
 } // namespace MTP

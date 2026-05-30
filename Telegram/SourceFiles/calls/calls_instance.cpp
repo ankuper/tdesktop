@@ -15,7 +15,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "history/history_item.h"
 #include "mtproto/mtproto_dh_utils.h"
+/* === TYPE3-PROXY BEGIN === */
 #include "mtproto/mtproto_proxy_data.h"
+/* === TYPE3-PROXY END === */
 #include "core/application.h"
 #include "core/core_settings.h"
 #include "main/session/session_show.h"
@@ -217,6 +219,7 @@ void Instance::startOutgoingCall(
 	}), args.video);
 }
 
+/* === TYPE3-PROXY BEGIN === */
 #if defined(TDESKTOP_TYPE3_CALLS) && TDESKTOP_TYPE3_CALLS
 // P3 (audit): every group/conference-call entry path in the codebase routes
 // through Instance::startOrJoinGroupCall or Instance::startOrJoinConferenceCall
@@ -240,11 +243,13 @@ static bool BlockedByMtproto3Proxy() {
 		&& selected.type == MTP::ProxyData::Type::Mtproto3;
 }
 #endif // TDESKTOP_TYPE3_CALLS
+/* === TYPE3-PROXY END === */
 
 void Instance::startOrJoinGroupCall(
 		std::shared_ptr<Ui::Show> show,
 		not_null<PeerData*> peer,
 		StartGroupCallArgs args) {
+/* === TYPE3-PROXY BEGIN === */
 #if defined(TDESKTOP_TYPE3_CALLS) && TDESKTOP_TYPE3_CALLS
 	// Story 9-1 AC#5: P2 — intercept BEFORE confirmLeaveCurrent so the user does
 	// NOT have to dismiss an active 1:1 call before learning that group calls are
@@ -255,6 +260,7 @@ void Instance::startOrJoinGroupCall(
 		return;
 	}
 #endif
+/* === TYPE3-PROXY END === */
 	confirmLeaveCurrent(show, peer, args, [=](StartGroupCallArgs args) {
 		using JoinConfirm = Calls::StartGroupCallArgs::JoinConfirm;
 		const auto context = (args.confirm == JoinConfirm::Always)
@@ -280,6 +286,7 @@ void Instance::startOrJoinGroupCall(
 void Instance::startOrJoinConferenceCall(StartConferenceInfo args) {
 	Expects(args.call || args.show);
 
+/* === TYPE3-PROXY BEGIN === */
 #if defined(TDESKTOP_TYPE3_CALLS) && TDESKTOP_TYPE3_CALLS
 	// Story 9-1 AC#5: P1 — same Mtproto3 short-circuit as startOrJoinGroupCall.
 	// Conference path bypasses startOrJoinGroupCall entirely (push-invite + direct
@@ -292,6 +299,7 @@ void Instance::startOrJoinConferenceCall(StartConferenceInfo args) {
 		return;
 	}
 #endif
+/* === TYPE3-PROXY END === */
 
 	const auto migrationInfo = (args.migrating
 		&& args.call

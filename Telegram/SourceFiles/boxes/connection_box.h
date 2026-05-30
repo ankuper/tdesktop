@@ -16,9 +16,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "mtproto/connection_abstract.h"
 #include "mtproto/mtproto_proxy_data.h"
 
+/* === TYPE3-PROXY BEGIN === */
 namespace Tdesktop::Teleproto3 {
 class IndicatorC1;
 } // namespace Tdesktop::Teleproto3
+/* === TYPE3-PROXY END === */
 
 namespace Ui {
 class Show;
@@ -100,6 +102,7 @@ public:
 	[[nodiscard]] bool contains(const ProxyData &proxy) const;
 	void addNewItem(const ProxyData &proxy);
 
+	/* === TYPE3-PROXY BEGIN === */
 	// FR9 same-key match helpers (story 2-2; AC-2).
 	// Returns the item id of the first Mtproto3 entry whose 16 raw key
 	// octets match proxy, or std::nullopt if none found.
@@ -118,6 +121,7 @@ public:
 	// story 2.6 / 2.10 — the factory API is established here (story 2.5 boundary).
 	[[nodiscard]] std::unique_ptr<Tdesktop::Teleproto3::IndicatorC1>
 		createActiveC1Indicator(QWidget *parent);
+	/* === TYPE3-PROXY END === */
 
 	rpl::producer<ItemView> views() const;
 

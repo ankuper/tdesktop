@@ -23,6 +23,7 @@ project(Telegram
     HOMEPAGE_URL "https://desktop.telegram.org"
 )
 
+# === TYPE3-PROXY BEGIN ===
 # ── Story 2-1 tests-only mode ────────────────────────────────────────────────
 # Pass -DTELEPROTO3_TESTS_ONLY=ON to configure ONLY the Story 2-1 QtTest
 # binaries without pulling in the full tdesktop dependency graph.
@@ -54,6 +55,7 @@ if(TELEPROTO3_TESTS_ONLY)
     return()
 endif()
 # ── End tests-only mode ──────────────────────────────────────────────────────
+# === TYPE3-PROXY END ===
 
 if (APPLE)
     enable_language(OBJC OBJCXX)
@@ -97,6 +99,7 @@ set(desktop_app_skip_libs
 add_subdirectory(cmake)
 add_subdirectory(Telegram)
 
+# === TYPE3-PROXY BEGIN ===
 # Tests — Story 2-1 conformance harness + AR-C3 fingerprint-lock test.
 # Off by default; enable with -DTELEPROTO3_TESTS=ON (full build) or
 # -DTELEPROTO3_TESTS_ONLY=ON (tests-only configure, no Telegram).
@@ -105,3 +108,4 @@ if(TELEPROTO3_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
+# === TYPE3-PROXY END ===

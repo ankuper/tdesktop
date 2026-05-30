@@ -39,6 +39,7 @@ class VideoTrack;
 struct DeviceResolvedId;
 } // namespace Webrtc
 
+/* === TYPE3-PROXY BEGIN === */
 #if TDESKTOP_TYPE3_CALLS
 namespace Tdesktop::Teleproto3 {
 struct ShimHandle;
@@ -53,6 +54,7 @@ struct ShimHandleDeleter {
 using UniqueShimHandle = std::unique_ptr<ShimHandle, ShimHandleDeleter>;
 } // namespace Tdesktop::Teleproto3
 #endif // TDESKTOP_TYPE3_CALLS
+/* === TYPE3-PROXY END === */
 
 namespace Calls {
 
@@ -384,9 +386,11 @@ private:
 	std::vector<not_null<PeerData*>> _conferenceParticipants;
 
 	std::unique_ptr<tgcalls::Instance> _instance;
+/* === TYPE3-PROXY BEGIN === */
 #if TDESKTOP_TYPE3_CALLS
 	Tdesktop::Teleproto3::UniqueShimHandle _t3ShimHandle; // Story 9-1 (P6: RAII)
 #endif
+/* === TYPE3-PROXY END === */
 	std::shared_ptr<tgcalls::VideoCaptureInterface> _videoCapture;
 	QString _videoCaptureDeviceId;
 	bool _videoCaptureIsScreencast = false;

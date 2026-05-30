@@ -101,7 +101,9 @@ using ProxyData = MTP::ProxyData;
 	using Type = ProxyData::Type;
 	return (proxy.type == Type::Socks5)
 		|| (proxy.type == Type::Mtproto)
+		/* === TYPE3-PROXY BEGIN === */
 		|| (proxy.type == Type::Mtproto3);
+		/* === TYPE3-PROXY END === */
 }
 
 [[nodiscard]] QString ProxyDataToQueryPath(const ProxyData &proxy) {
@@ -287,10 +289,12 @@ void ShowProxyQrBox(std::shared_ptr<Ui::Show> show, const QString &link) {
 		proxy.password = fields.value(u"pass"_q);
 	} else if (type == ProxyData::Type::Mtproto) {
 		proxy.password = fields.value(u"secret"_q);
+	/* === TYPE3-PROXY BEGIN === */
 	} else if (type == ProxyData::Type::Mtproto3) {
 		proxy.password = fields.value(u"secret"_q);
 		proxy.wsPath = fields.value(u"wspath"_q);
 	}
+	/* === TYPE3-PROXY END === */
 	return proxy;
 };
 
@@ -348,6 +352,7 @@ void AddProxyFromClipboard(
 					auto &secret = fields[u"secret"_q];
 					secret.replace('+', '-').replace('/', '_');
 				}
+				/* === TYPE3-PROXY BEGIN === */
 				// Determine exact type: try Mtproto3 (0xff marker) first.
 				// Discrimination: if the decoded secret's first octet is 0xff
 				// AND t3_secret_parse succeeds → Type3; otherwise → Mtproto.
@@ -392,6 +397,7 @@ void AddProxyFromClipboard(
 					}
 					break;
 				}
+				/* === TYPE3-PROXY END === */
 				// Type1/Type2 path: whole-record contains check.
 				const auto contains = controller->contains(proxy);
 				const auto toast = (contains
