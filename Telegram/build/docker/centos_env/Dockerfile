@@ -19,7 +19,7 @@ RUN dnf -y install epel-release \
 		pulseaudio-libs-devel mesa-libGL-devel mesa-libEGL-devel mesa-libgbm-devel \
 		libdrm-devel vulkan-devel libva-devel libvdpau-devel libselinux-devel \
 		libmount-devel systemd-devel glib2-devel gobject-introspection-devel \
-		at-spi2-core-devel gtk3-devel \
+		at-spi2-core-devel gtk3-devel libbsd-devel \
 	&& dnf clean all
 
 RUN alternatives --set python3 /usr/bin/python3.11
