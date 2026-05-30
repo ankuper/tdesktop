@@ -9,7 +9,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "mtproto/connection_tcp.h"
 #include "mtproto/connection_http.h"
+/* === TYPE3-PROXY BEGIN === */
 #include "mtproto/connection_teleproto3.h"
+/* === TYPE3-PROXY END === */
 #include "mtproto/connection_resolving.h"
 #include "mtproto/session.h"
 #include "base/unixtime.h"
@@ -175,6 +177,7 @@ ConnectionPointer AbstractConnection::Create(
 		QThread *thread,
 		const bytes::vector &secret,
 		const ProxyData &proxy) {
+	/* === TYPE3-PROXY BEGIN === */
 	// [W2] Type::Mtproto3 always uses the WebSocket transport regardless of DC protocol variant.
 	if (proxy.type == ProxyData::Type::Mtproto3) {
 		return ConnectionPointer::New<ConnectionTeleproto3>(
@@ -182,6 +185,7 @@ ConnectionPointer AbstractConnection::Create(
 			thread,
 			proxy);
 	}
+	/* === TYPE3-PROXY END === */
 	auto result = [&] {
 		if (protocol == DcOptions::Variants::Tcp) {
 			return ConnectionPointer::New<TcpConnection>(

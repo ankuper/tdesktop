@@ -97,11 +97,13 @@ void Account::watchProxyChanges() {
 	Core::App().proxyChanges(
 	) | rpl::on_next([=](const ProxyChange &change) {
 		const auto key = [&](const MTP::ProxyData &proxy) {
+			/* === TYPE3-PROXY BEGIN === */
 			// [W3] Include Mtproto3 so proxy-setting changes trigger reInitConnection.
 			return (proxy.type == MTP::ProxyData::Type::Mtproto
 				|| proxy.type == MTP::ProxyData::Type::Mtproto3)
 				? std::make_pair(proxy.host, proxy.port)
 				: std::make_pair(QString(), uint32(0));
+			/* === TYPE3-PROXY END === */
 		};
 		if (_mtp) {
 			_mtp->restart();

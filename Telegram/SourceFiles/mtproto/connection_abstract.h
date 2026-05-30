@@ -14,9 +14,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QObject>
 #include <QtCore/QThread>
 
+/* === TYPE3-PROXY BEGIN === */
 #include <cstdint>
-#include <deque>
 #include <optional>
+/* === TYPE3-PROXY END === */
+#include <deque>
 
 namespace MTP {
 
@@ -104,6 +106,7 @@ public:
 	[[nodiscard]] virtual QString transport() const = 0;
 	[[nodiscard]] virtual QString tag() const = 0;
 
+	/* === TYPE3-PROXY BEGIN === */
 	// Story 2-13: per-connection state snapshot for the [T3-keepalive] block emitted
 	// by SessionPrivate on the Could-not-send-ping restart path. Default-empty struct;
 	// only ConnectionTeleproto3 overrides. Non-Type3 transports honestly report
@@ -123,6 +126,7 @@ public:
 	[[nodiscard]] virtual KeepaliveSnapshot collectKeepaliveSnapshot() const {
 		return {};
 	}
+	/* === TYPE3-PROXY END === */
 
 	void setSentEncryptedWithKeyId(uint64 keyId) {
 		_sentEncryptedWithKeyId = keyId;

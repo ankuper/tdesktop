@@ -31,8 +31,10 @@ namespace {
 	case 1: return MTP::ProxyData::Settings::Enabled;
 	case 2: return MTP::ProxyData::Settings::Disabled;
 	}
+	/* === TYPE3-PROXY BEGIN === */
 	LOG(("Settings Warning: Unknown ProxySettings value %1, defaulting to System.").arg(value));
 	return MTP::ProxyData::Settings::System;
+	/* === TYPE3-PROXY END === */
 }
 
 [[nodiscard]] MTP::ProxyData DeserializeProxyData(const QByteArray &data) {
@@ -54,6 +56,7 @@ namespace {
 		case 1: return MTP::ProxyData::Type::Socks5;
 		case 2: return MTP::ProxyData::Type::Http;
 		case 3: return MTP::ProxyData::Type::Mtproto;
+		/* === TYPE3-PROXY BEGIN === */
 		case 4: return MTP::ProxyData::Type::Mtproto3;
 		}
 		LOG(("Settings Warning: Unknown proxy type %1 in stored data, resetting to None.").arg(proxyType));
@@ -62,6 +65,7 @@ namespace {
 	if (!stream.atEnd()) {
 		stream >> proxy.wsPath;
 	}
+	/* === TYPE3-PROXY END === */
 	return proxy;
 }
 
@@ -72,7 +76,9 @@ namespace {
 		+ 1 * sizeof(qint32)
 		+ Serialize::stringSize(proxy.user)
 		+ Serialize::stringSize(proxy.password)
+		/* === TYPE3-PROXY BEGIN === */
 		+ Serialize::stringSize(proxy.wsPath);
+		/* === TYPE3-PROXY END === */
 
 	result.reserve(size);
 	{
@@ -82,7 +88,9 @@ namespace {
 			case MTP::ProxyData::Type::Socks5: return 1;
 			case MTP::ProxyData::Type::Http: return 2;
 			case MTP::ProxyData::Type::Mtproto: return 3;
+			/* === TYPE3-PROXY BEGIN === */
 			case MTP::ProxyData::Type::Mtproto3: return 4;
+			/* === TYPE3-PROXY END === */
 			}
 			Unexpected("Bad type in SerializeProxyData");
 		}();
@@ -95,7 +103,9 @@ namespace {
 			<< qint32(proxy.port)
 			<< proxy.user
 			<< proxy.password
+			/* === TYPE3-PROXY BEGIN === */
 			<< proxy.wsPath;
+			/* === TYPE3-PROXY END === */
 	}
 	return result;
 }

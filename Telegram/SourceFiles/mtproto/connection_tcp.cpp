@@ -514,6 +514,7 @@ void TcpConnection::connectToServer(
 	Expects(_protocol == nullptr);
 	Expects(_protocolDcId == 0);
 
+	/* === TYPE3-PROXY BEGIN === */
 	// [W2] Type::Mtproto3 connections reach ConnectionTeleproto3 via AbstractConnection::Create;
 	// the guard here is defence-in-depth in case TcpConnection is used as fallback.
 	const auto isMtprotoProxy = (_proxy.type == ProxyData::Type::Mtproto
@@ -523,6 +524,7 @@ void TcpConnection::connectToServer(
 			? _proxy.secretFromType3Password()
 			: _proxy.secretFromMtprotoPassword())
 		: protocolSecret;
+	/* === TYPE3-PROXY END === */
 	if (isMtprotoProxy) {
 		_address = _proxy.host;
 		_port = _proxy.port;

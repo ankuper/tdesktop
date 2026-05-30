@@ -26,9 +26,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "media/audio/media_audio_track.h"
 #include "mtproto/mtproto_config.h"
 #include "mtproto/mtproto_dh_utils.h"
+/* === TYPE3-PROXY BEGIN === */
 #if TDESKTOP_TYPE3_CALLS
 #include "mtproto/teleproto3_bridge.h"
 #endif
+/* === TYPE3-PROXY END === */
 #include "ui/boxes/confirm_box.h"
 #include "ui/boxes/rate_call_box.h"
 #include "webrtc/webrtc_create_adm.h"
@@ -1174,6 +1176,7 @@ void Call::createAndStartController(const MTPDphoneCall &call) {
 		if (settingsProxy.useProxyForCalls() && settingsProxy.isEnabled()) {
 			const auto &selected = settingsProxy.selected();
 			if (selected.supportsCalls() && !selected.host.isEmpty()) {
+				/* === TYPE3-PROXY BEGIN === */
 				// P11: guard the Mtproto3 arm of this assert behind the build flag
 				// — in TDESKTOP_TYPE3_CALLS=OFF builds the enum value still exists
 				// but treating it as SOCKS5 below leaks plaintext through the wrong path.
@@ -1244,6 +1247,7 @@ void Call::createAndStartController(const MTPDphoneCall &call) {
 					descriptor.config.allowTCP = true;
 				} else // (type == Type::Socks5) — P10
 #endif // TDESKTOP_TYPE3_CALLS
+				/* === TYPE3-PROXY END === */
 				{
 					descriptor.proxy = std::make_unique<tgcalls::Proxy>();
 					descriptor.proxy->host = selected.host.toStdString();
@@ -1737,11 +1741,13 @@ void Call::destroyController() {
 		_instance.reset();
 		DEBUG_LOG(("Call Info: Call controller destroyed."));
 	}
+/* === TYPE3-PROXY BEGIN === */
 #if TDESKTOP_TYPE3_CALLS
 	// P6: RAII reset — deleter calls ShimClose only if non-null, so this is safe
 	// to invoke on every teardown path (early-exit, dtor, re-entry, missed close).
 	_t3ShimHandle.reset();
 #endif
+/* === TYPE3-PROXY END === */
 	setSignalBarCount(kSignalBarFinished);
 }
 
