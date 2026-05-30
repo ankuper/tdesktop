@@ -13,6 +13,7 @@ def parse_changelog(changelog_path):
         changelog_lines = f.read().splitlines()
 
     releases = []
+    release = None
     for l in changelog_lines:
         version_match = version_re.match(l)
         entry_match = entry_re.match(l)
@@ -24,7 +25,8 @@ def parse_changelog(changelog_path):
                        [])
             releases.append(release)
         elif entry_match is not None:
-            release[3].append(entry_match.group(1))
+            if release is not None:
+                release[3].append(entry_match.group(1))
 
     return releases
 
