@@ -162,21 +162,25 @@ jobs:
             -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO
 
           cmake --build build
-          macdeployqt build/Telegram.app
-          codesign --remove-signature build/Telegram.app
+          APP_BUNDLE=$(find build -maxdepth 1 -name "*.app" | head -1)
+          echo "APP_BUNDLE=$APP_BUNDLE" >> $GITHUB_ENV
+          macdeployqt "$APP_BUNDLE"
+          codesign --remove-signature "$APP_BUNDLE"
 
       - name: Package DMG.
         run: |
+          APP_NAME=$(basename "${{ env.APP_BUNDLE }}" .app)
           cd $REPO_NAME/build
-          hdiutil create -volname "Telegram" -srcfolder Telegram.app -ov -format UDZO Telegram-unsigned.dmg
-          ls -lh Telegram-unsigned.dmg
+          hdiutil create -volname "$APP_NAME" -srcfolder "${{ env.APP_BUNDLE }}" -ov -format UDZO ${APP_NAME}-unsigned.dmg
+          ls -lh ${APP_NAME}-unsigned.dmg
+          echo "DMG_NAME=${APP_NAME}-unsigned.dmg" >> $GITHUB_ENV
 
       - name: Upload .dmg artifact.
         if: env.UPLOAD_ARTIFACT == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: Telegram-macOS-unsigned-dmg
-          path: ${{ env.REPO_NAME }}/build/Telegram-unsigned.dmg
+          path: ${{ env.REPO_NAME }}/build/${{ env.DMG_NAME }}
           retention-days: 30
 
       - name: Upload .app artifact.
@@ -184,5 +188,5 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: Telegram-macOS-unsigned-app
-          path: ${{ env.REPO_NAME }}/build/Telegram.app
+          path: ${{ env.APP_BUNDLE }}
           retention-days: 30
