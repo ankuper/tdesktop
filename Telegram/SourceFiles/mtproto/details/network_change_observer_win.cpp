@@ -16,14 +16,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #ifdef Q_OS_WIN
 
-#include "mtproto/connection_teleproto3.h"
+#include "mtproto/details/network_change_observer_win_p.h"
 
-#include <QObject>
 #include <QPointer>
-
-#include <objbase.h>
-#include <netlistmgr.h>
-#include <ocidl.h>
+#include <atomic>
 
 namespace Tdesktop::Teleproto3 {
 
@@ -69,79 +65,58 @@ private:
 
 } // namespace
 
-// Win32NetworkObserver must NOT be in an anonymous namespace: Q_OBJECT generates
-// staticMetaObject with external linkage, which conflicts with anonymous-namespace
-// internal linkage under MSVC (/GL or Unity builds) — MSVC error C7631.
-// Placing it directly in Tdesktop::Teleproto3 is sufficient for encapsulation.
-class Win32NetworkObserver : public QObject {
-	Q_OBJECT
+Win32NetworkObserver::Win32NetworkObserver(QObject *parent)
+: QObject(parent) {
+	if (FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) {
+		return;
+	}
+	_comInitialised = true;
 
-public:
-	explicit Win32NetworkObserver(QObject *parent = nullptr)
-	: QObject(parent) {
-		if (FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) {
-			return;
-		}
-		_comInitialised = true;
+	INetworkListManager *nlm = nullptr;
+	if (FAILED(CoCreateInstance(
+			CLSID_NetworkListManager, nullptr,
+			CLSCTX_ALL, IID_INetworkListManager,
+			reinterpret_cast<void**>(&nlm)))) {
+		return;
+	}
+	_nlm = nlm;
 
-		INetworkListManager *nlm = nullptr;
-		if (FAILED(CoCreateInstance(
-				CLSID_NetworkListManager, nullptr,
-				CLSCTX_ALL, IID_INetworkListManager,
-				reinterpret_cast<void**>(&nlm)))) {
-			return;
-		}
-		_nlm = nlm;
+	IConnectionPointContainer *cpc = nullptr;
+	if (FAILED(nlm->QueryInterface(IID_IConnectionPointContainer, reinterpret_cast<void**>(&cpc)))) {
+		return;
+	}
 
-		IConnectionPointContainer *cpc = nullptr;
-		if (FAILED(nlm->QueryInterface(IID_IConnectionPointContainer, reinterpret_cast<void**>(&cpc)))) {
-			return;
-		}
-
-		IConnectionPoint *cp = nullptr;
-		if (FAILED(cpc->FindConnectionPoint(IID_INetworkListManagerEvents, &cp))) {
-			cpc->Release();
-			return;
-		}
+	IConnectionPoint *cp = nullptr;
+	if (FAILED(cpc->FindConnectionPoint(IID_INetworkListManagerEvents, &cp))) {
 		cpc->Release();
-
-		_sink = new NlmEventSink(this);
-		if (FAILED(cp->Advise(_sink, &_cookie))) {
-			_sink->Release();
-			_sink = nullptr;
-			cp->Release();
-			return;
-		}
-		_cp = cp;
+		return;
 	}
+	cpc->Release();
 
-	~Win32NetworkObserver() override {
-		if (_cp && _cookie != 0) {
-			_cp->Unadvise(_cookie);
-		}
-		if (_cp) { _cp->Release(); }
-		if (_sink) { _sink->Release(); }
-		if (_nlm) { _nlm->Release(); }
-		if (_comInitialised) { CoUninitialize(); }
+	_sink = new NlmEventSink(this);
+	if (FAILED(cp->Advise(_sink, &_cookie))) {
+		_sink->Release();
+		_sink = nullptr;
+		cp->Release();
+		return;
 	}
+	_cp = cp;
+}
 
-Q_SIGNALS:
-	void pathChanged();
-
-private:
-	bool _comInitialised = false;
-	INetworkListManager *_nlm = nullptr;
-	IConnectionPoint *_cp = nullptr;
-	NlmEventSink *_sink = nullptr;
-	DWORD _cookie = 0;
-};
+Win32NetworkObserver::~Win32NetworkObserver() {
+	if (_cp && _cookie != 0) {
+		_cp->Unadvise(_cookie);
+	}
+	if (_cp) { _cp->Release(); }
+	if (_sink) { _sink->Release(); }
+	if (_nlm) { _nlm->Release(); }
+	if (_comInitialised) { CoUninitialize(); }
+}
 
 QObject *createNetworkObserver(QObject *parent) {
 	return new Win32NetworkObserver(parent);
 }
 
 } // namespace Tdesktop::Teleproto3
-
-#include "network_change_observer_win.moc"
 
 #endif // Q_OS_WIN
