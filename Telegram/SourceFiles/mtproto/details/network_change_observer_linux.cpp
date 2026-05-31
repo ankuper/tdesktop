@@ -34,7 +34,7 @@ class LinuxNetworkObserver : public QObject {
 public:
 	explicit LinuxNetworkObserver(QObject *parent = nullptr)
 	: QObject(parent) {
-		const auto bus = QDBusConnection::systemBus();
+		auto bus = QDBusConnection::systemBus();
 		const auto connected = bus.connect(
 			u"org.freedesktop.NetworkManager"_q,
 			u"/org/freedesktop/NetworkManager"_q,
@@ -46,7 +46,7 @@ public:
 			// NetworkManager unavailable — fall back to 30-second suspect-resume polling.
 			auto *timer = new QTimer(this);
 			timer->setInterval(30'000);
-			QObject::connect(timer, &QTimer::timeout, this, [this] { emit pathChanged(); });
+			QObject::connect(timer, &QTimer::timeout, this, [this] { Q_EMIT pathChanged(); });
 			timer->start();
 		}
 	}
@@ -56,7 +56,7 @@ Q_SIGNALS:
 
 private Q_SLOTS:
 	void onNmStateChanged(uint /*state*/) {
-		emit pathChanged();
+		Q_EMIT pathChanged();
 	}
 };
 
