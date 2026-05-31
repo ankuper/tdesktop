@@ -1644,21 +1644,6 @@ ProxyData ProxyBox::collectData() {
 	// wsPath: not yet exposed via a UI widget (story 2.6 forward-cite).
 	// Preserved from the original data via the editItemBox callback.
 
-	// Auto-promote: if the user selected MTPROTO but pasted a Type3 secret
-	// (0xff prefix in hex, or base64url-decoded first byte == 0xff),
-	// automatically switch to Mtproto3. The UI doesn't expose a separate
-	// Mtproto3 radio button — detection is by secret format.
-	if (result.type == Type::Mtproto && !result.password.isEmpty()) {
-		const auto pw = result.password.toLower();
-		// Hex-encoded Type3: starts with "ff" and is long enough for domain
-		if (pw.size() >= 36 && pw[0] == 'f' && pw[1] == 'f') {
-			result.type = Type::Mtproto3;
-		}
-	}
-
-	const auto isMtprotoFamilyFinal = (result.type == Type::Mtproto
-		|| result.type == Type::Mtproto3);
-
 	if (result.host.isEmpty()) {
 		_host->showError();
 	} else if (!result.port) {
@@ -1666,7 +1651,7 @@ ProxyData ProxyBox::collectData() {
 	} else if ((result.type == Type::Http || result.type == Type::Socks5)
 		&& !result.password.isEmpty() && result.user.isEmpty()) {
 		_user->showError();
-	} else if (isMtprotoFamilyFinal && !result.valid()) {
+	} else if (isMtprotoFamily && !result.valid()) {
 		_secret->showError();
 	} else if (!result) {
 		_host->showError();
