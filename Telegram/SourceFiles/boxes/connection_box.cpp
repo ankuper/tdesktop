@@ -2211,6 +2211,22 @@ object_ptr<Ui::BoxContent> ProxiesBoxController::editItemBox(int id) {
 			if (existingId.has_value() && *existingId != i->id) {
 				auto j = findById(*existingId);
 				if (j != end(_list)) {
+					// The edit now shares its 16-byte key with another saved
+					// Type3 entry, so fold the edit into that entry and drop
+					// the duplicate. replaceItemWith only removes `i` and
+					// re-selects `j`; it assumes `j` already holds the target
+					// data in the canonical _settings list (the whole-record
+					// path below guarantees that). Since the key-only match
+					// does NOT, push the update into _settings here, or the
+					// FR9 in-place edit is lost on the next save/restart. A
+					// deleted `j` is re-inserted by replaceItemWith ->
+					// restoreItem, so skip the replace in that case.
+					if (!j->deleted) {
+						const auto replaced = _settings.replaceInList(
+							j->data,
+							result);
+						Assert(replaced);
+					}
 					j->data = result;
 					replaceItemWith(i, j);
 					return;
