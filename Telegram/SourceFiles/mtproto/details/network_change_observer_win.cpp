@@ -28,9 +28,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace Tdesktop::Teleproto3 {
 
 namespace {
-
 // COM sink: receives INetworkListManagerEvents notifications on a COM thread.
 // Marshals pathChanged() emission back to the Qt thread via QMetaObject::invokeMethod.
+// NlmEventSink has no Q_OBJECT so anonymous namespace is safe here.
 class NlmEventSink final
 	: public INetworkListManagerEvents {
 public:
@@ -67,6 +67,12 @@ private:
 	std::atomic<ULONG> _refCount;
 };
 
+} // namespace
+
+// Win32NetworkObserver must NOT be in an anonymous namespace: Q_OBJECT generates
+// staticMetaObject with external linkage, which conflicts with anonymous-namespace
+// internal linkage under MSVC (/GL or Unity builds) — MSVC error C7631.
+// Placing it directly in Tdesktop::Teleproto3 is sufficient for encapsulation.
 class Win32NetworkObserver : public QObject {
 	Q_OBJECT
 
@@ -129,8 +135,6 @@ private:
 	NlmEventSink *_sink = nullptr;
 	DWORD _cookie = 0;
 };
-
-} // namespace
 
 QObject *createNetworkObserver(QObject *parent) {
 	return new Win32NetworkObserver(parent);

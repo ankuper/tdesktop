@@ -20,6 +20,7 @@ RUN dnf -y install epel-release \
 		libdrm-devel vulkan-devel libva-devel libvdpau-devel libselinux-devel \
 		libmount-devel systemd-devel glib2-devel gobject-introspection-devel \
 		at-spi2-core-devel gtk3-devel libbsd-devel \
+		libsecret-devel dbus-devel \
 	&& dnf clean all
 
 RUN alternatives --set python3 /usr/bin/python3.11

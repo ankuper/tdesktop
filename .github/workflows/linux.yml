@@ -102,6 +102,11 @@ jobs:
           rm -rf ${{ runner.temp }}/.buildx-cache
           mv ${{ runner.temp }}/.buildx-cache{-new,}
 
+      - name: Patch ThirdParty dispatch (suppress Wsign-conversion in event_epoll.c).
+        run: |
+          sed -i 's/return dmn->dmn_events \& ~dmn->dmn_disarmed_events;/return (uint32_t)(dmn->dmn_events \& ~(uint32_t)dmn->dmn_disarmed_events);/' \
+            Telegram/ThirdParty/dispatch/src/event/event_epoll.c
+
       - name: Telegram Desktop build.
         if: env.ONLY_CACHE == 'false'
         run: |
