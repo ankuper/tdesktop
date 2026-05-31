@@ -1586,6 +1586,7 @@ PRIVATE
     mtproto/details/network_change_observer_linux.cpp
     mtproto/details/network_change_observer_mac.mm
     mtproto/details/network_change_observer_win.cpp
+    mtproto/details/network_change_observer_win_p.h
     mtproto/teleproto3_bridge.cpp
     mtproto/teleproto3_bridge.h
     mtproto/secure_store.h
@@ -2235,6 +2236,13 @@ else()
     include(${cmake_helpers_loc}/external/glib/generate_dbus.cmake)
     generate_dbus(Telegram org.freedesktop.portal. XdpBackground ${third_party_loc}/xdg-desktop-portal/data/org.freedesktop.portal.Background.xml)
     generate_dbus(Telegram org.freedesktop. XdgNotifications ${src_loc}/platform/linux/org.freedesktop.Notifications.xml)
+
+    # secure_store_linux.cpp uses libsecret (Secret Service D-Bus API, story 2.4).
+    # libsecret-1 headers live under /usr/include/libsecret-1/ — pkg-config provides the path.
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LIBSECRET REQUIRED libsecret-1)
+    target_include_directories(Telegram PRIVATE ${LIBSECRET_INCLUDE_DIRS})
+    target_link_libraries(Telegram PRIVATE ${LIBSECRET_LIBRARIES})
 
     if (NOT DESKTOP_APP_DISABLE_X11_INTEGRATION)
         target_link_libraries(Telegram
