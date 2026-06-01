@@ -21,6 +21,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QPointer>
 #include <atomic>
 
+// Real COM headers live here (the _p.h header only forward-declares them so moc
+// stays Qt-only). This TU compiles to nothing on non-Windows via the guard.
+#include <objbase.h>
+#include <netlistmgr.h>
+#include <ocidl.h>
+
 namespace Tdesktop::Teleproto3 {
 
 namespace {
