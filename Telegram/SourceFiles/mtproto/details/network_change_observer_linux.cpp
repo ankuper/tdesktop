@@ -17,57 +17,42 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #ifdef Q_OS_LINUX
 
+#include "mtproto/details/network_change_observer_linux_p.h"
+
 #include "mtproto/connection_teleproto3.h"
 
 #include <QDBusConnection>
-#include <QDBusInterface>
-#include <QObject>
 #include <QTimer>
 
 namespace Tdesktop::Teleproto3 {
 
-namespace {
-
-class LinuxNetworkObserver : public QObject {
-	Q_OBJECT
-
-public:
-	explicit LinuxNetworkObserver(QObject *parent = nullptr)
-	: QObject(parent) {
-		auto bus = QDBusConnection::systemBus();
-		const auto connected = bus.connect(
-			u"org.freedesktop.NetworkManager"_q,
-			u"/org/freedesktop/NetworkManager"_q,
-			u"org.freedesktop.NetworkManager"_q,
-			u"StateChanged"_q,
-			this,
-			SLOT(onNmStateChanged(uint)));
-		if (!connected) {
-			// NetworkManager unavailable — fall back to 30-second suspect-resume polling.
-			auto *timer = new QTimer(this);
-			timer->setInterval(30'000);
-			QObject::connect(timer, &QTimer::timeout, this, [this] { Q_EMIT pathChanged(); });
-			timer->start();
-		}
+LinuxNetworkObserver::LinuxNetworkObserver(QObject *parent)
+: QObject(parent) {
+	auto bus = QDBusConnection::systemBus();
+	const auto connected = bus.connect(
+		u"org.freedesktop.NetworkManager"_q,
+		u"/org/freedesktop/NetworkManager"_q,
+		u"org.freedesktop.NetworkManager"_q,
+		u"StateChanged"_q,
+		this,
+		SLOT(onNmStateChanged(uint)));
+	if (!connected) {
+		// NetworkManager unavailable — fall back to 30-second suspect-resume polling.
+		auto *timer = new QTimer(this);
+		timer->setInterval(30'000);
+		QObject::connect(timer, &QTimer::timeout, this, [this] { Q_EMIT pathChanged(); });
+		timer->start();
 	}
+}
 
-Q_SIGNALS:
-	void pathChanged();
-
-private Q_SLOTS:
-	void onNmStateChanged(uint /*state*/) {
-		Q_EMIT pathChanged();
-	}
-};
-
-} // namespace
+void LinuxNetworkObserver::onNmStateChanged(uint /*state*/) {
+	Q_EMIT pathChanged();
+}
 
 QObject *createNetworkObserver(QObject *parent) {
 	return new LinuxNetworkObserver(parent);
 }
 
 } // namespace Tdesktop::Teleproto3
-
-#include "network_change_observer_linux.moc"
 
 #endif // Q_OS_LINUX
