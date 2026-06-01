@@ -7,22 +7,22 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#ifdef Q_OS_WIN
+// NO #ifdef Q_OS_WIN guard here: moc does not have Q_OS_WIN defined when it
+// scans this header, so a guard would make it skip the Q_OBJECT class and emit
+// an empty moc (→ unresolved metaObject/qt_metacall at link). The header is
+// gated to Windows-only in CMakeLists (AUTOMOC processes it only there).
+//
+// COM interfaces are forward-declared instead of pulling in <netlistmgr.h> etc.
+// so moc parses only Qt — heavy Windows SDK headers can trip moc's preprocessor.
 
 #include <QObject>
-#include <objbase.h>
-#include <netlistmgr.h>
-#include <ocidl.h>
+
+struct INetworkListManager;
+struct IConnectionPoint;
+struct INetworkListManagerEvents;
 
 namespace Tdesktop::Teleproto3 {
 
-// Win32NetworkObserver must be declared in a header (not inside an anonymous
-// namespace in a .cpp) so that AUTOMOC generates moc_*_win_p.cpp with external
-// linkage — placing Q_OBJECT in an anonymous namespace causes MSVC C7631 /
-// LNK2001 (staticMetaObject internal-linkage conflict).
-//
-// _sink is typed as INetworkListManagerEvents* so NlmEventSink (defined in the
-// .cpp's anonymous namespace) does not need to be forward-declared here.
 class Win32NetworkObserver : public QObject {
 	Q_OBJECT
 
@@ -38,9 +38,7 @@ private:
 	INetworkListManager *_nlm = nullptr;
 	IConnectionPoint *_cp = nullptr;
 	INetworkListManagerEvents *_sink = nullptr;
-	DWORD _cookie = 0;
+	unsigned long _cookie = 0; // DWORD without dragging in <windows.h>.
 };
 
 } // namespace Tdesktop::Teleproto3
-
-#endif // Q_OS_WIN
