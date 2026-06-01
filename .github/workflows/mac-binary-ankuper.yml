@@ -169,10 +169,15 @@ jobs:
 
       - name: Package DMG.
         run: |
+          # APP_BUNDLE is relative to REPO_NAME (e.g. "build/T3ChatM.app");
+          # use REPO_NAME prefix so we can stay in GITHUB_WORKSPACE.
           APP_NAME=$(basename "${{ env.APP_BUNDLE }}" .app)
-          cd $REPO_NAME/build
-          hdiutil create -volname "$APP_NAME" -srcfolder "${{ env.APP_BUNDLE }}" -ov -format UDZO ${APP_NAME}-unsigned.dmg
-          ls -lh ${APP_NAME}-unsigned.dmg
+          DMG="$REPO_NAME/build/${APP_NAME}-unsigned.dmg"
+          hdiutil create -volname "$APP_NAME" \
+            -srcfolder "$REPO_NAME/${{ env.APP_BUNDLE }}" \
+            -ov -format UDZO "$DMG"
+          ls -lh "$DMG"
+          echo "DMG_PATH=$DMG" >> $GITHUB_ENV
           echo "DMG_NAME=${APP_NAME}-unsigned.dmg" >> $GITHUB_ENV
 
       - name: Upload .dmg artifact.
@@ -180,7 +185,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: Telegram-macOS-unsigned-dmg
-          path: ${{ env.REPO_NAME }}/build/${{ env.DMG_NAME }}
+          path: ${{ env.DMG_PATH }}
           retention-days: 30
 
       - name: Upload .app artifact.
@@ -188,5 +193,5 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: Telegram-macOS-unsigned-app
-          path: ${{ env.APP_BUNDLE }}
+          path: ${{ env.REPO_NAME }}/${{ env.APP_BUNDLE }}
           retention-days: 30

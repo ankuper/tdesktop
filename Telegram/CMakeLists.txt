@@ -1582,6 +1582,7 @@ PRIVATE
     mtproto/connection_teleproto3_ui.cpp
     mtproto/connection_teleproto3_ui.h
     mtproto/details/network_change_observer_linux.cpp
+    mtproto/details/network_change_observer_linux_p.h
     mtproto/details/network_change_observer_mac.mm
     mtproto/details/network_change_observer_win.cpp
     mtproto/details/network_change_observer_win_p.h
