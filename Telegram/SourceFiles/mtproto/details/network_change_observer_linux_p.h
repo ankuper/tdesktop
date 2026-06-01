@@ -7,17 +7,15 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#ifdef Q_OS_LINUX
+// NO #ifdef Q_OS_LINUX guard here: moc does not have Q_OS_LINUX defined when it
+// scans this header, so a guard would make it skip the Q_OBJECT class and emit
+// an empty moc (→ undefined vtable / pathChanged at link time). Instead the
+// header is gated to Linux-only in CMakeLists (AUTOMOC processes it only there).
 
 #include <QObject>
 
 namespace Tdesktop::Teleproto3 {
 
-// Q_OBJECT must NOT be in an anonymous namespace: MOC generates signal
-// bodies and vtable entries that would have internal linkage, causing
-// "undefined reference to vtable / pathChanged()" at link time.
-// The class is private (only used by createNetworkObserver) but must
-// be in a named scope so AUTOMOC generates correctly-linked symbols.
 class LinuxNetworkObserver : public QObject {
 	Q_OBJECT
 
@@ -32,5 +30,3 @@ private Q_SLOTS:
 };
 
 } // namespace Tdesktop::Teleproto3
-
-#endif // Q_OS_LINUX

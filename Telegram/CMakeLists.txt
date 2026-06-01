@@ -1582,10 +1582,13 @@ PRIVATE
     mtproto/connection_teleproto3_ui.cpp
     mtproto/connection_teleproto3_ui.h
     mtproto/details/network_change_observer_linux.cpp
-    mtproto/details/network_change_observer_linux_p.h
+    # Q_OBJECT headers gated per-platform: AUTOMOC must only process each on its
+    # own OS. The classes carry no #ifdef guard (moc can't evaluate Q_OS_* and
+    # would otherwise skip the class, yielding empty moc + unresolved symbols).
+    $<$<PLATFORM_ID:Linux>:mtproto/details/network_change_observer_linux_p.h>
     mtproto/details/network_change_observer_mac.mm
     mtproto/details/network_change_observer_win.cpp
-    mtproto/details/network_change_observer_win_p.h
+    $<$<PLATFORM_ID:Windows>:mtproto/details/network_change_observer_win_p.h>
     mtproto/teleproto3_bridge.cpp
     mtproto/teleproto3_bridge.h
     mtproto/secure_store.h
