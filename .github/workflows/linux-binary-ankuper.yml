@@ -132,19 +132,24 @@ jobs:
 
       - name: Check output.
         run: |
-          filePath="out/Release/Telegram"
-          if [ ! -f "$filePath" ]; then
-            echo "FAIL: Telegram binary missing at $filePath"
-            find out -maxdepth 3 -type f -name 'Telegram' -o -name 'Updater' 2>/dev/null | head
+          # The brand renames the main binary (e.g. T3ChatM); discover it rather
+          # than assuming "Telegram". Updater may be absent when autoupdate is off.
+          BIN=$(find out/Release -maxdepth 1 -type f -perm -u+x ! -name '*.so*' \
+            -exec sh -c 'file "$1" | grep -q ELF && echo "$1"' _ {} \; | head -1)
+          if [ -z "$BIN" ]; then
+            echo "FAIL: no ELF binary found in out/Release"
+            ls -la out/Release | head -20
             exit 1
           fi
-          ls -la out/Release/Telegram out/Release/Updater 2>&1 | head -5
-          file out/Release/Telegram | head -1
+          echo "MAIN_BIN=$BIN" >> $GITHUB_ENV
+          ls -la "$BIN"
+          file "$BIN" | head -1
 
       - name: Stage artifact.
         run: |
           mkdir -p out/Release/artifact
-          cp out/Release/Telegram out/Release/Updater out/Release/artifact/
+          cp "$MAIN_BIN" out/Release/artifact/
+          [ -f out/Release/Updater ] && cp out/Release/Updater out/Release/artifact/ || true
           sha256sum out/Release/artifact/* | tee out/Release/artifact/SHA256SUMS
 
       - name: Upload artifact.
