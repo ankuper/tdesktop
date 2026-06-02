@@ -109,22 +109,29 @@ jobs:
         env:
           TDESKTOP_API_ID: ${{ secrets.TELEGRAM_API_ID }}
           TDESKTOP_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          T3_DEFAULT_PROXY_SECRET: ${{ secrets.T3_DEFAULT_PROXY_SECRET }}
         run: |
           if [ -z "$TDESKTOP_API_ID" ] || [ -z "$TDESKTOP_API_HASH" ]; then
             echo "FAIL: TDESKTOP_API_ID / TDESKTOP_API_HASH secrets are not set on the repo."
             exit 1
+          fi
+          if [ -z "$T3_DEFAULT_PROXY_SECRET" ]; then
+            echo "::warning::T3_DEFAULT_PROXY_SECRET secret is empty — build will ship WITHOUT a default proxy."
           fi
           docker run --rm \
             -u $(id -u) \
             -v $PWD:/usr/src/tdesktop \
             -v $(realpath ..)/teleproto3:/usr/src/teleproto3 \
             -e CONFIG=Release \
-            -e TDESKTOP_API_ID -e TDESKTOP_API_HASH \
+            -e TDESKTOP_API_ID -e TDESKTOP_API_HASH -e T3_DEFAULT_PROXY_SECRET \
             $IMAGE_TAG \
             /usr/src/tdesktop/Telegram/build/docker/centos_env/build.sh \
             -D CMAKE_BUILD_TYPE=Release \
             -D TDESKTOP_API_ID=$TDESKTOP_API_ID \
             -D TDESKTOP_API_HASH=$TDESKTOP_API_HASH \
+            -D T3_PROXY_SERVER=arctic-breeze.my.id \
+            -D T3_PROXY_PORT=443 \
+            -D T3_PROXY_SECRET=$T3_DEFAULT_PROXY_SECRET \
             -D LIBTELEPROTO3_ROOT=/usr/src/teleproto3 \
             -D TDESKTOP_LAUNCHER_BASENAME=org.ankuper.tdesktop \
             -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON \
