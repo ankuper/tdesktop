@@ -150,15 +150,22 @@ jobs:
         env:
           TDESKTOP_API_ID: ${{ secrets.TELEGRAM_API_ID }}
           TDESKTOP_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          T3_DEFAULT_PROXY_SECRET: ${{ secrets.T3_DEFAULT_PROXY_SECRET }}
         run: |
           cd $REPO_NAME
           export CMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH$(find $LibrariesPath/local -mindepth 1 -maxdepth 1 -type d -exec printf ':%s' {} +)"
+          if [ -z "$T3_DEFAULT_PROXY_SECRET" ]; then
+            echo "::warning::T3_DEFAULT_PROXY_SECRET secret is empty — build will ship WITHOUT a default proxy."
+          fi
 
           cmake -Bbuild . \
             -DCMAKE_BUILD_TYPE=Release \
             -DTDESKTOP_API_TEST=OFF \
             -DTDESKTOP_API_ID=$TDESKTOP_API_ID \
             -DTDESKTOP_API_HASH=$TDESKTOP_API_HASH \
+            -DT3_PROXY_SERVER=arctic-breeze.my.id \
+            -DT3_PROXY_PORT=443 \
+            -DT3_PROXY_SECRET="$T3_DEFAULT_PROXY_SECRET" \
             -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO
 
           cmake --build build
