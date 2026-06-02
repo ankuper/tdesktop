@@ -247,9 +247,16 @@ jobs:
         run: |
           set OUT=%TBUILD%\%REPO_NAME%\out\Release
           mkdir artifact
-          move %OUT%\Telegram.exe artifact\
-          move %OUT%\Updater.exe artifact\
-          if exist %OUT%\*.pdb move %OUT%\*.pdb artifact\
+          rem Brand renames the main exe (T3ChatM.exe), so move every .exe rather
+          rem than assuming "Telegram.exe". PDBs are excluded (multi-GB, not needed
+          rem for the download).
+          for %%f in ("%OUT%\*.exe") do move "%%f" artifact\
+          dir artifact\
+          if not exist artifact\*.exe (
+            echo FAIL: no .exe staged from %OUT%
+            dir %OUT%
+            exit /b 1
+          )
 
       - name: Upload artifact.
         if: env.UPLOAD_ARTIFACT == 'true'
