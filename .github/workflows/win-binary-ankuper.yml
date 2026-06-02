@@ -226,6 +226,7 @@ jobs:
         env:
           TDESKTOP_API_ID: ${{ secrets.TELEGRAM_API_ID }}
           TDESKTOP_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+          T3_DEFAULT_PROXY_SECRET: ${{ secrets.T3_DEFAULT_PROXY_SECRET }}
         run: |
           cd %TBUILD%\%REPO_NAME%\Telegram
 
@@ -236,6 +237,9 @@ jobs:
             -D TDESKTOP_API_TEST=OFF ^
             -D TDESKTOP_API_ID=%TDESKTOP_API_ID% ^
             -D TDESKTOP_API_HASH=%TDESKTOP_API_HASH% ^
+            -D T3_PROXY_SERVER=arctic-breeze.my.id ^
+            -D T3_PROXY_PORT=443 ^
+            -D T3_PROXY_SECRET=%T3_DEFAULT_PROXY_SECRET% ^
             -D LIBTELEPROTO3_ROOT=%TBUILD%\teleproto3 ^
             -D LIBTELEPROTO3_LIB_PATH=%LIBTELEPROTO3_LIB_PATH% ^
             -D DESKTOP_APP_DISABLE_AUTOUPDATE=OFF ^
