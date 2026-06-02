@@ -1,9 +1,13 @@
-# Story 2-9: Generate t3_default_proxy.gen.h from .credentials
+# Story 2-9: Generate t3_default_proxy.gen.h with the PROD http-stream default proxy.
 # This script is invoked by CMake at configure time.
-# If .credentials exists, parses it and emits #defines.
-# If not, emits empty defaults so the build still succeeds.
+#
+# Source of truth (in priority order):
+#   1. -D override (CI):  -DT3_PROXY_SERVER=... -DT3_PROXY_PORT=... -DT3_PROXY_SECRET=...
+#      The secret is injected from a repo CI secret so it never lives in git.
+#   2. .credentials (local dev, gitignored): HTTPSTREAM_PROD_* keys (legacy WS_DOMAIN/
+#      TYPE3_SECRET still accepted as a fallback).
+# If neither yields a non-empty secret, empty defaults are emitted (no proxy injected).
 
-get_filename_component(CREDENTIALS_FILE "${CMAKE_SOURCE_DIR}/../../.credentials" REALPATH)
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/gen")
 set(OUTPUT_HEADER "${CMAKE_CURRENT_BINARY_DIR}/gen/t3_default_proxy.gen.h")
 
@@ -11,45 +15,66 @@ set(T3_DEFAULT_SERVER "")
 set(T3_DEFAULT_PORT "0")
 set(T3_DEFAULT_SECRET "")
 
-if(EXISTS "${CREDENTIALS_FILE}")
-    file(STRINGS "${CREDENTIALS_FILE}" _cred_lines)
-    foreach(_line ${_cred_lines})
-        # Skip comments and empty lines
-        string(REGEX MATCH "^#" _is_comment "${_line}")
-        if(_is_comment)
-            continue()
-        endif()
-
-        # WS_DOMAIN=... (v2 direct) or WORKER_DOMAIN=... (legacy CF Workers)
-        string(REGEX MATCH "^WS_DOMAIN=(.+)$" _match "${_line}")
-        if(_match)
-            set(T3_DEFAULT_SERVER "${CMAKE_MATCH_1}")
-        endif()
-        string(REGEX MATCH "^WORKER_DOMAIN=(.+)$" _match "${_line}")
-        if(_match AND "${T3_DEFAULT_SERVER}" STREQUAL "")
-            set(T3_DEFAULT_SERVER "${CMAKE_MATCH_1}")
-        endif()
-
-        # TYPE3_SECRET=...
-        string(REGEX MATCH "^TYPE3_SECRET=(.+)$" _match "${_line}")
-        if(_match)
-            set(T3_DEFAULT_SECRET "${CMAKE_MATCH_1}")
-        endif()
-    endforeach()
-
-    # Port is always 443 for WS/TLS
-    if(NOT "${T3_DEFAULT_SERVER}" STREQUAL "")
+if(DEFINED T3_PROXY_SECRET AND NOT "${T3_PROXY_SECRET}" STREQUAL "")
+    # --- (1) CI / -D override ---
+    set(T3_DEFAULT_SERVER "${T3_PROXY_SERVER}")
+    set(T3_DEFAULT_SECRET "${T3_PROXY_SECRET}")
+    if(DEFINED T3_PROXY_PORT AND NOT "${T3_PROXY_PORT}" STREQUAL "")
+        set(T3_DEFAULT_PORT "${T3_PROXY_PORT}")
+    else()
         set(T3_DEFAULT_PORT "443")
     endif()
-
-    message(STATUS "[T3] Default proxy from .credentials: ${T3_DEFAULT_SERVER}:${T3_DEFAULT_PORT}")
+    message(STATUS "[T3] Default proxy from -D override: ${T3_DEFAULT_SERVER}:${T3_DEFAULT_PORT}")
 else()
-    message(STATUS "[T3] No .credentials found — building without default proxy")
+    # --- (2) .credentials (local dev) ---
+    get_filename_component(CREDENTIALS_FILE "${CMAKE_SOURCE_DIR}/../../.credentials" REALPATH)
+    if(EXISTS "${CREDENTIALS_FILE}")
+        file(STRINGS "${CREDENTIALS_FILE}" _cred_lines)
+        foreach(_line ${_cred_lines})
+            string(REGEX MATCH "^#" _is_comment "${_line}")
+            if(_is_comment)
+                continue()
+            endif()
+            # Canonical PROD http-stream keys.
+            string(REGEX MATCH "^HTTPSTREAM_PROD_SERVER=(.+)$" _m "${_line}")
+            if(_m)
+                set(T3_DEFAULT_SERVER "${CMAKE_MATCH_1}")
+            endif()
+            string(REGEX MATCH "^HTTPSTREAM_PROD_PORT=(.+)$" _m "${_line}")
+            if(_m)
+                set(T3_DEFAULT_PORT "${CMAKE_MATCH_1}")
+            endif()
+            string(REGEX MATCH "^HTTPSTREAM_PROD_TYPE3_SECRET=(.+)$" _m "${_line}")
+            if(_m)
+                set(T3_DEFAULT_SECRET "${CMAKE_MATCH_1}")
+            endif()
+            # Legacy fallback (only if the canonical keys were absent).
+            string(REGEX MATCH "^WS_DOMAIN=(.+)$" _m "${_line}")
+            if(_m AND "${T3_DEFAULT_SERVER}" STREQUAL "")
+                set(T3_DEFAULT_SERVER "${CMAKE_MATCH_1}")
+            endif()
+            string(REGEX MATCH "^TYPE3_SECRET=(.+)$" _m "${_line}")
+            if(_m AND "${T3_DEFAULT_SECRET}" STREQUAL "")
+                set(T3_DEFAULT_SECRET "${CMAKE_MATCH_1}")
+            endif()
+        endforeach()
+        # Legacy fallback had no port; default to 443 for TLS.
+        if(NOT "${T3_DEFAULT_SERVER}" STREQUAL "" AND "${T3_DEFAULT_PORT}" STREQUAL "0")
+            set(T3_DEFAULT_PORT "443")
+        endif()
+        if(NOT "${T3_DEFAULT_SECRET}" STREQUAL "")
+            message(STATUS "[T3] Default proxy from .credentials: ${T3_DEFAULT_SERVER}:${T3_DEFAULT_PORT}")
+        else()
+            message(STATUS "[T3] .credentials has no http-stream secret — building without default proxy")
+        endif()
+    else()
+        message(STATUS "[T3] No -D override and no .credentials — building without default proxy")
+    endif()
 endif()
 
 file(WRITE "${OUTPUT_HEADER}"
     "// Auto-generated by generate_default_proxy.cmake — DO NOT COMMIT\n"
-    "// Source: .credentials (gitignored)\n"
+    "// Source: -D override (CI) or .credentials HTTPSTREAM_PROD_* (local).\n"
     "#pragma once\n"
     "\n"
     "#define T3_DEFAULT_SERVER \"${T3_DEFAULT_SERVER}\"\n"
