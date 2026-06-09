@@ -14,11 +14,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/random.h"
 
 #include <t3.h>
+#include <t3_client.h>
 
-#include <QtNetwork/QAbstractSocket>
+#include <QtCore/QSocketNotifier>
 #include <deque>
-
-class QSslSocket;
 
 namespace Tdesktop::Teleproto3 {
 
@@ -32,11 +31,17 @@ QObject *createNetworkObserver(QObject *parent = nullptr);
 namespace MTP {
 namespace details {
 
-// ConnectionTeleproto3 — WebSocket+TLS transport implementing the Type3 protocol.
+// ConnectionTeleproto3 — HTTP-stream transport implementing the Type3 protocol.
+//
+// The Type3 protocol (TLS + HTTP-chunk framing + AES-CTR + obfs2 init + padding)
+// is owned entirely by libteleproto3 and consumed through the high-level
+// t3_client_* API. This class only drives the libteleproto3 fd via a
+// QSocketNotifier and shuttles MTProto payloads in/out.
 //
 // Lifecycle mirrors TcpConnection:
-//   Waiting → Connecting (connectToServer) → Negotiating (WS up, header sent)
-//           → Ready (version OK, drain queue) → Finished (disconnectFromServer / error)
+//   Waiting → Connecting (connectToServer, t3_client_create)
+//           → Ready (t3_client state == READY, drain queue)
+//           → Finished (disconnectFromServer / error)
 //
 // Auth state lives in mtproto_auth_key; transport swap does not touch it.
 class ConnectionTeleproto3 : public AbstractConnection {
@@ -98,10 +103,10 @@ public Q_SLOTS:
 	void onNetworkChanged();
 
 private Q_SLOTS:
-	void onWsConnected();
-	void onWsDisconnected();
-	void onWsError(int err);
-	void onWsBinaryMessage(const QByteArray &data);
+	// Driven by the QSocketNotifier on the libteleproto3 fd. Pumps the client
+	// state machine, promotes to Ready on READY, and drains all available
+	// decrypted MTProto messages (one per t3_client_read).
+	void onClientReadable();
 
 private:
 	enum class Status { Waiting, Connecting, Negotiating, Ready, Finished };
@@ -110,13 +115,16 @@ private:
 	void teardownSession();
 	void drainPendingQueue();
 	void sendImmediate(const mtpBuffer &buffer);
+	// Shared close/reconnect path (replaces onWsDisconnected/onWsError).
+	void handleTransportError();
 	uint64_t nowMonotonicNs() const;
+	// Maps _consecutiveCloses → retry tier (replaces t3_retry_get_state).
+	t3_retry_state_t currentRetryTier() const;
 	// Fires rpl stream + tier3Reached() signal on first T3_RETRY_TIER3 entry.
 	void emitRetryState(t3_retry_state_t state);
 	// Returns composite reconnect delay: silent-close inner layer + NFR25 outer layer (ms).
 	int computeReconnectDelayMs();
 	// Emits a single level-0 [T3-disco] log line with four diagnostic fields.
-	// Call BEFORE teardownSession() so _t3session is still live for tier sampling.
 	void emitDiscoMarker(
 		const QString &state,
 		const QString &wsClose,
@@ -125,14 +133,13 @@ private:
 
 	const not_null<Instance*> _instance;
 
-	Tdesktop::Teleproto3::MiniWebSocket *_ws = nullptr;
-	QSslSocket *_tls = nullptr;
+	// libteleproto3 owns the TLS socket, obfs2 init, AES-CTR and HTTP-chunk
+	// framing. We only poll its fd and shuttle MTProto payloads.
+	t3_client_stream *_client = nullptr;
+	int _clientFd = -1;
+	QSocketNotifier *_readNotifier = nullptr;
 
-	t3_session_t *_t3session = nullptr;
-	Tdesktop::Teleproto3::BridgeContext *_bridgeCtx = nullptr;
-	t3_callbacks_t _callbacks = {};
-
-	// Pending queue: messages buffered while Connecting/Negotiating or on proxy switch.
+	// Pending queue: messages buffered while Connecting or on proxy switch.
 	// Bound by Story 2.3 Task 6; align with AR-S3 once frozen.
 	static constexpr int kQueueMaxMessages = 1024;
 	static constexpr int kQueueMaxBytes    = 8 * 1024 * 1024; // 8 MiB
@@ -156,17 +163,14 @@ private:
 	Status _status = Status::Waiting;
 	crl::time _pingTimeMs = 0;
 
-	// MTProto DD obfuscated handshake state.
-	uchar _obfSendKey[32] = {};
-	uchar _obfRecvKey[32] = {};
-	CTRState _obfSendState = {};
-	CTRState _obfRecvState = {};
-	MTPint128 _checkNonce = {};
-	bool _connectionStarted = false;
+	// Retry-tier tracking (replaces the removed t3_session_t retry FSM).
+	// Reset to 0 on reaching Ready and on userRetry(); incremented on each
+	// close while/after Ready. Mapped to a tier by currentRetryTier().
+	int _consecutiveCloses = 0;
 
 	// Story 2-13: cache members for the [T3-keepalive] snapshot. Updated at
-	// connect entry, on every binary recv, on retry-tier transitions, and on
-	// silent-close delay sampling. Read-only by the snapshot accessor.
+	// connect entry, on every binary recv, and on retry-tier transitions.
+	// Read-only by the snapshot accessor.
 	crl::time _connectToServerAtMs = 0;
 	crl::time _lastBinaryRecvAtMs = 0;
 	t3_retry_state_t _lastRetryTier = T3_RETRY_TIER1;
