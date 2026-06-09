@@ -120,6 +120,13 @@ set_target_properties(teleproto3 PROPERTIES
     IMPORTED_LOCATION_RELWITHDEBINFO "${LIBTELEPROTO3_LIB_PATH}"
     IMPORTED_LOCATION_MINSIZEREL     "${LIBTELEPROTO3_LIB_PATH}"
     INTERFACE_INCLUDE_DIRECTORIES    "${LIBTELEPROTO3_INCLUDE_DIR}"
+    # libteleproto3's t3_client_* transport links OpenSSL directly (SSL_new/read/
+    # write/CTX_*/get_error) for its own TLS. Declare the dependency on the
+    # imported target so every consumer pulls libssl+libcrypto AFTER teleproto3.a
+    # in link order — otherwise the static linker discards the unused SSL_*
+    # symbols from external_openssl before reaching teleproto3's references and
+    # the final binary fails with undefined references to SSL_*.
+    INTERFACE_LINK_LIBRARIES         "desktop-app::external_openssl"
 )
 
 
