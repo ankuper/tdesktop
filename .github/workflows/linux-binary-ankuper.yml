@@ -92,6 +92,7 @@ jobs:
               cmake -S lib -B lib/build \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DT3_CSPRNG_BACKEND=linux \
+                -DT3_BUILD_CLIENT=ON \
                 -DT3_BUILD_TESTS=OFF && \
               cmake --build lib/build --config Release
             "
