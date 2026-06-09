@@ -205,6 +205,7 @@ jobs:
           cmake -B build -G "Ninja" ^
             -DCMAKE_BUILD_TYPE=Release ^
             -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded ^
+            -DT3_BUILD_CLIENT=ON ^
             -DT3_BUILD_TESTS=OFF ^
             -DOPENSSL_INCLUDE_DIR="%OPENSSL3_DIR%\include" ^
             -DOPENSSL_CRYPTO_LIBRARY="%OPENSSL3_DIR%\out\libcrypto.lib" ^
