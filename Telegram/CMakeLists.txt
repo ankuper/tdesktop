@@ -120,6 +120,9 @@ set_target_properties(teleproto3 PROPERTIES
     IMPORTED_LOCATION_RELWITHDEBINFO "${LIBTELEPROTO3_LIB_PATH}"
     IMPORTED_LOCATION_MINSIZEREL     "${LIBTELEPROTO3_LIB_PATH}"
     INTERFACE_INCLUDE_DIRECTORIES    "${LIBTELEPROTO3_INCLUDE_DIR}"
+    # libteleproto3 t3_client_* links OpenSSL directly (SSL_*); declare the dep on
+    # the imported target so libssl+libcrypto come AFTER teleproto3.a in link order.
+    INTERFACE_LINK_LIBRARIES         "desktop-app::external_openssl"
 )
 # T3ChatM brand: Generate t3_default_proxy.gen.h from .credentials (gitignored).
 include(${CMAKE_CURRENT_SOURCE_DIR}/generate_default_proxy.cmake)
