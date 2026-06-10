@@ -194,10 +194,12 @@ PRIVATE
     desktop-app::external_qr_code_generator
     desktop-app::external_crash_reports
     desktop-app::external_auto_updates
-    desktop-app::external_openssl
     desktop-app::external_openal
     desktop-app::external_xxhash
     teleproto3
+    # OpenSSL after teleproto3: t3_client_* references SSL_*; static linker
+    # resolves a provider only when listed after its consumers.
+    desktop-app::external_openssl
 )
 
 # Story 2.5 — Subtask 2.1 + 6.1: wire libteleproto3 into td_ui so
