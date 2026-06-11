@@ -120,9 +120,6 @@ set_target_properties(teleproto3 PROPERTIES
     IMPORTED_LOCATION_RELWITHDEBINFO "${LIBTELEPROTO3_LIB_PATH}"
     IMPORTED_LOCATION_MINSIZEREL     "${LIBTELEPROTO3_LIB_PATH}"
     INTERFACE_INCLUDE_DIRECTORIES    "${LIBTELEPROTO3_INCLUDE_DIR}"
-    # libteleproto3 t3_client_* links OpenSSL directly (SSL_*); declare the dep on
-    # the imported target so libssl+libcrypto come AFTER teleproto3.a in link order.
-    INTERFACE_LINK_LIBRARIES         "desktop-app::external_openssl"
 )
 # T3ChatM brand: Generate t3_default_proxy.gen.h from .credentials (gitignored).
 include(${CMAKE_CURRENT_SOURCE_DIR}/generate_default_proxy.cmake)
@@ -196,10 +193,9 @@ PRIVATE
     desktop-app::external_auto_updates
     desktop-app::external_openal
     desktop-app::external_xxhash
-    teleproto3
-    # OpenSSL after teleproto3: t3_client_* references SSL_*; static linker
-    # resolves a provider only when listed after its consumers.
-    desktop-app::external_openssl
+    # RESCAN link group: teleproto3 t3_client_* refs SSL_*; dedup otherwise puts
+    # libssl before teleproto3.a. --start-group/--end-group re-scans to resolve.
+    "$<LINK_GROUP:RESCAN,teleproto3,desktop-app::external_openssl>"
 )
 
 # Story 2.5 — Subtask 2.1 + 6.1: wire libteleproto3 into td_ui so
