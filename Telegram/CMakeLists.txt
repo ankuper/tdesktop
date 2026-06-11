@@ -194,6 +194,7 @@ PRIVATE
     desktop-app::external_qr_code_generator
     desktop-app::external_crash_reports
     desktop-app::external_auto_updates
+    desktop-app::external_openssl
     desktop-app::external_openal
     desktop-app::external_xxhash
     # libteleproto3's t3_client_* references OpenSSL libssl (SSL_new/read/write/
