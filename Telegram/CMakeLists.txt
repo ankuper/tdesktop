@@ -120,13 +120,6 @@ set_target_properties(teleproto3 PROPERTIES
     IMPORTED_LOCATION_RELWITHDEBINFO "${LIBTELEPROTO3_LIB_PATH}"
     IMPORTED_LOCATION_MINSIZEREL     "${LIBTELEPROTO3_LIB_PATH}"
     INTERFACE_INCLUDE_DIRECTORIES    "${LIBTELEPROTO3_INCLUDE_DIR}"
-    # libteleproto3's t3_client_* transport links OpenSSL directly (SSL_new/read/
-    # write/CTX_*/get_error) for its own TLS. Declare the dependency on the
-    # imported target so every consumer pulls libssl+libcrypto AFTER teleproto3.a
-    # in link order — otherwise the static linker discards the unused SSL_*
-    # symbols from external_openssl before reaching teleproto3's references and
-    # the final binary fails with undefined references to SSL_*.
-    INTERFACE_LINK_LIBRARIES         "desktop-app::external_openssl"
 )
 
 
@@ -198,12 +191,14 @@ PRIVATE
     desktop-app::external_auto_updates
     desktop-app::external_openal
     desktop-app::external_xxhash
-    teleproto3
-    # OpenSSL must come AFTER teleproto3: libteleproto3's t3_client_* references
-    # SSL_*/crypto symbols, and a static linker only resolves a provider listed
-    # after its consumers. (external_openssl bundles external_openssl_ssl +
-    # external_openssl_crypto.)
-    desktop-app::external_openssl
+    # libteleproto3's t3_client_* references OpenSSL libssl (SSL_new/read/write/
+    # CTX_*/get_error). CMake de-duplicates external_openssl to its earliest
+    # position (pulled transitively by td_mtproto etc.), which lands libssl.a
+    # BEFORE teleproto3.a — so the static linker drops the unused SSL_* before
+    # reaching teleproto3's references. Wrap both in a RESCAN link group
+    # (--start-group/--end-group) so the linker re-scans and resolves them
+    # regardless of ordering.
+    "$<LINK_GROUP:RESCAN,teleproto3,desktop-app::external_openssl>"
 )
 
 # Story 2.5 — Subtask 2.1 + 6.1: wire libteleproto3 into td_ui so
