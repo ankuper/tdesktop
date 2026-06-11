@@ -191,11 +191,10 @@ PRIVATE
     desktop-app::external_qr_code_generator
     desktop-app::external_crash_reports
     desktop-app::external_auto_updates
+    desktop-app::external_openssl
     desktop-app::external_openal
     desktop-app::external_xxhash
-    # RESCAN link group: teleproto3 t3_client_* refs SSL_*; dedup otherwise puts
-    # libssl before teleproto3.a. --start-group/--end-group re-scans to resolve.
-    "$<LINK_GROUP:RESCAN,teleproto3,desktop-app::external_openssl>"
+    teleproto3
 )
 
 # Story 2.5 — Subtask 2.1 + 6.1: wire libteleproto3 into td_ui so
