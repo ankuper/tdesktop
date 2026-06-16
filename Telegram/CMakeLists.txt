@@ -140,12 +140,16 @@ target_link_libraries(td_mtproto PUBLIC teleproto3)
 # (not de-duplicated against the target form), in a RESCAN link group with
 # teleproto3 at the final link. HINTS cover the desktop-app bundled install
 # (/usr/local/lib64 on the Linux reference image) and OPENSSL_ROOT_DIR (mac).
+set(_t3_openssl_hints /usr/local/lib64 /usr/local/lib)
+if (DEFINED OPENSSL_ROOT_DIR)
+    list(APPEND _t3_openssl_hints "${OPENSSL_ROOT_DIR}/lib")
+endif()
 find_library(T3_OPENSSL_SSL_LIB
     NAMES ssl libssl
-    HINTS /usr/local/lib64 /usr/local/lib "${OPENSSL_ROOT_DIR}/lib")
+    HINTS ${_t3_openssl_hints})
 find_library(T3_OPENSSL_CRYPTO_LIB
     NAMES crypto libcrypto
-    HINTS /usr/local/lib64 /usr/local/lib "${OPENSSL_ROOT_DIR}/lib")
+    HINTS ${_t3_openssl_hints})
 if (NOT T3_OPENSSL_SSL_LIB OR NOT T3_OPENSSL_CRYPTO_LIB)
     message(FATAL_ERROR
         "libteleproto3 t3_client_* needs OpenSSL libssl/libcrypto but they were "
