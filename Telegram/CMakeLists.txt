@@ -155,7 +155,14 @@ if (NOT T3_OPENSSL_SSL_LIB OR NOT T3_OPENSSL_CRYPTO_LIB)
         "libteleproto3 t3_client_* needs OpenSSL libssl/libcrypto but they were "
         "not found (ssl='${T3_OPENSSL_SSL_LIB}' crypto='${T3_OPENSSL_CRYPTO_LIB}').")
 endif()
-message(WARNING "T3DIAG ssl='${T3_OPENSSL_SSL_LIB}' crypto='${T3_OPENSSL_CRYPTO_LIB}'")
+# Make libssl.a (then libcrypto.a) a link dependency OF teleproto3, so CMake
+# always places them AFTER teleproto3.a in the link line — for every consumer,
+# regardless of where teleproto3 is listed or response-file ordering. desktop-app's
+# external_openssl surfaces only libcrypto here (TLS is normally via Qt), so the
+# t3_client_* SSL_* symbols are otherwise unresolved. File paths (not targets)
+# aren't de-duplicated to an earlier position.
+set_property(TARGET teleproto3 APPEND PROPERTY
+    INTERFACE_LINK_LIBRARIES "${T3_OPENSSL_SSL_LIB}" "${T3_OPENSSL_CRYPTO_LIB}")
 
 # Story 9-1: SOCKS5-over-Type3 voice calls (dogfood ≤5 users).
 # Default OFF; enable for dogfood builds: -DTDESKTOP_TYPE3_CALLS=ON
@@ -223,13 +230,6 @@ PRIVATE
     desktop-app::external_openal
     desktop-app::external_xxhash
     teleproto3
-    # libteleproto3's t3_client_* references OpenSSL SSL_* (libssl). desktop-app's
-    # external_openssl surfaces only libcrypto in this build (TLS is normally via
-    # Qt), so libssl is absent from the link entirely. List the static libssl.a
-    # (then libcrypto.a for libssl's own crypto refs) by file path right AFTER
-    # teleproto3 so the linker resolves teleproto3's SSL_* left-to-right.
-    "${T3_OPENSSL_SSL_LIB}"
-    "${T3_OPENSSL_CRYPTO_LIB}"
 )
 
 # Story 2.5 — Subtask 2.1 + 6.1: wire libteleproto3 into td_ui so
