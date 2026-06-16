@@ -194,7 +194,14 @@ PRIVATE
     desktop-app::external_openssl
     desktop-app::external_openal
     desktop-app::external_xxhash
-    teleproto3
+    # teleproto3 t3_client_* references OpenSSL SSL_* + crypto symbols. The lib is
+    # listed after its providers, and CMake dedups external_openssl_ssl_bundled
+    # (libssl.a) to an earlier position, so the static linker drops the unused
+    # SSL_* before reaching teleproto3.a. Wrap teleproto3 with the bundled static
+    # ssl+crypto archives in a RESCAN group (--start-group/--end-group) to resolve
+    # the cross-references regardless of order. (LINK_GROUP needs the STATIC
+    # _bundled targets; the INTERFACE external_openssl alias is rejected.)
+    "$<LINK_GROUP:RESCAN,teleproto3,desktop-app::external_openssl_ssl_bundled,desktop-app::external_openssl_crypto_bundled>"
 )
 
 # Story 2.5 — Subtask 2.1 + 6.1: wire libteleproto3 into td_ui so

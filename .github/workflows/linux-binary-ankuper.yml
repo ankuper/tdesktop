@@ -98,15 +98,6 @@ jobs:
             "
           ls -la ../teleproto3/lib/build/libteleproto3.a
 
-      - name: DIAG — locate libssl/libcrypto in the build image.
-        run: |
-          docker run --rm $IMAGE_TAG bash -c "
-            echo '=== libssl*.a / libcrypto*.a anywhere ==='; find / -name 'libssl*.a' -o -name 'libcrypto*.a' 2>/dev/null;
-            echo '=== /usr/local/lib64 ==='; ls -la /usr/local/lib64/ 2>/dev/null | grep -iE 'ssl|crypto' || true;
-            echo '=== openssl3 build dir ==='; find / -path '*openssl3*' -name '*.a' 2>/dev/null | head;
-            echo '=== SSL_new symbol in any .a ==='; for f in \$(find / -name 'libssl*.a' 2>/dev/null); do echo \$f; nm \$f 2>/dev/null | grep -m1 ' T SSL_new' && echo '  -> has SSL_new'; done
-          "
-
       - name: Patch ThirdParty dispatch (suppress Wsign-conversion in event_epoll.c).
         # dispatch/DispatchCompilerWarnings.cmake enables -Wsign-conversion -Werror.
         # event_epoll.c:92 returns int & ~int as uint32_t — harmless, but clang errors.
