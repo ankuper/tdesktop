@@ -132,6 +132,26 @@ target_include_directories(Telegram PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/gen)
 # Link teleproto3 to td_mtproto so that mtproto_proxy_data.cpp can find t3.h
 target_link_libraries(td_mtproto PUBLIC teleproto3)
 
+# libteleproto3's t3_client_* transport links OpenSSL directly (SSL_*). The
+# static libssl.a is bundled by desktop-app, but CMake de-duplicates it to a
+# position BEFORE teleproto3.a (pulled transitively by earlier consumers), so
+# the static linker drops the unused SSL_* before reaching teleproto3's
+# references. Locate the static archives by file so they can be placed, by path
+# (not de-duplicated against the target form), in a RESCAN link group with
+# teleproto3 at the final link. HINTS cover the desktop-app bundled install
+# (/usr/local/lib64 on the Linux reference image) and OPENSSL_ROOT_DIR (mac).
+find_library(T3_OPENSSL_SSL_LIB
+    NAMES ssl libssl
+    HINTS /usr/local/lib64 /usr/local/lib "${OPENSSL_ROOT_DIR}/lib")
+find_library(T3_OPENSSL_CRYPTO_LIB
+    NAMES crypto libcrypto
+    HINTS /usr/local/lib64 /usr/local/lib "${OPENSSL_ROOT_DIR}/lib")
+if (NOT T3_OPENSSL_SSL_LIB OR NOT T3_OPENSSL_CRYPTO_LIB)
+    message(FATAL_ERROR
+        "libteleproto3 t3_client_* needs OpenSSL libssl/libcrypto but they were "
+        "not found (ssl='${T3_OPENSSL_SSL_LIB}' crypto='${T3_OPENSSL_CRYPTO_LIB}').")
+endif()
+
 # Story 9-1: SOCKS5-over-Type3 voice calls (dogfood ≤5 users).
 # Default OFF; enable for dogfood builds: -DTDESKTOP_TYPE3_CALLS=ON
 option(TDESKTOP_TYPE3_CALLS
@@ -204,7 +224,7 @@ PRIVATE
     # ssl+crypto archives in a RESCAN group (--start-group/--end-group) to resolve
     # the cross-references regardless of order. (LINK_GROUP needs the STATIC
     # _bundled targets; the INTERFACE external_openssl alias is rejected.)
-    "$<LINK_GROUP:RESCAN,teleproto3,desktop-app::external_openssl_ssl_bundled,desktop-app::external_openssl_crypto_bundled>"
+    "$<LINK_GROUP:RESCAN,teleproto3,${T3_OPENSSL_SSL_LIB},${T3_OPENSSL_CRYPTO_LIB}>"
 )
 
 # Story 2.5 — Subtask 2.1 + 6.1: wire libteleproto3 into td_ui so
