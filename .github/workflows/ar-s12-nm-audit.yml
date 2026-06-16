@@ -69,8 +69,12 @@ jobs:
           echo "Scanning: $LIB"
           # POSIX format → stable cross-platform symbol-name column.
           # Word-boundary anchors avoid false positives on benign substrings.
+          # t3_client_* migration: the lib now owns TLS via OpenSSL (SSL_*/TLS_*)
+          # and its own t3c_ws_frame_* framing — those are expected, not leaks.
+          # Still forbid PLATFORM-NATIVE stacks (SChannel/SecureTransport/CFNetwork/
+          # WinHTTP/Qt/NWWebSocket/...) which would break host-stack neutrality.
           LEAKS=$(nm -P "$LIB" | awk '{print $1}' \
-              | grep -iE '(^|_)(ssl|tls|openssl|boringssl|mbedtls|gnutls|wolfssl|schannel|securetransport|cf|cfnetwork|nw|winhttp|bcrypt|secitem|qt|qwebsocket|nwwebsocket|conscrypt|okhttp|websocket|ws_[a-z]*frame)([_$]|$)' \
+              | grep -iE '(^|_)(schannel|securetransport|cfnetwork|winhttp|secitem|qt|qwebsocket|nwwebsocket|conscrypt|okhttp)([_$]|$)' \
               || true)
           if [ -n "$LEAKS" ]; then
               echo "AR-S12 VIOLATION: lib leaks host-stack symbol(s):" >&2

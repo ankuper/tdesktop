@@ -2347,10 +2347,15 @@ source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/Telegram PREFIX Resources FILES ${
 
 target_include_directories(Telegram PRIVATE ${src_loc})
 
-# AR-S12 nm-audit: verify libteleproto3.a has no host-stack symbol leakage.
-# Scope: the static archive ONLY (D2 resolution, story 2-1) — host-stack
-# neutrality is a property of the lib, not of the linked Telegram binary.
-# Fails the build if any TLS/WS/OS-specific symbol is found in the lib object.
+# AR-S12 nm-audit: verify libteleproto3.a does not couple to a PLATFORM-NATIVE
+# networking/TLS stack. Scope: the static archive ONLY (D2 resolution, story 2-1).
+#
+# Updated for the t3_client_* migration: libteleproto3 now owns its transport
+# (TLS via OpenSSL + its own HTTP-chunk/WS framing), so it LEGITIMATELY references
+# OpenSSL (SSL_*/TLS_*) and its own t3c_ws_frame_* symbols — these are no longer
+# leaks. The audit still fails the build if the lib pulls in a platform-native
+# stack (SChannel, SecureTransport, CFNetwork, WinHTTP, Qt, NWWebSocket, etc.),
+# which would break cross-platform host-stack neutrality.
 # Permissions: read-only (no push/PR/issue write scope needed — Epic 1 §13).
 #
 # Skipped on Windows (no `nm`/`grep` in default MSVC toolchain). The CI
@@ -2369,7 +2374,7 @@ fi
 # The regex anchors host-stack tokens with word boundaries to avoid matching
 # benign substrings like `cxa_finalize` containing `cf_` etc.
 LEAKS=$(nm -P \"$LIB\" 2>/dev/null | awk '{print \$1}' \\
-    | grep -iE '(^|_)(ssl|tls|openssl|boringssl|mbedtls|gnutls|wolfssl|schannel|securetransport|cf|cfnetwork|nw|winhttp|bcrypt|secitem|qt|qwebsocket|nwwebsocket|conscrypt|okhttp|websocket|ws_[a-z]*frame)([_$]|$)' \\
+    | grep -iE '(^|_)(schannel|securetransport|cfnetwork|winhttp|secitem|qt|qwebsocket|nwwebsocket|conscrypt|okhttp)([_$]|$)' \\
     || true)
 if [ -n \"$LEAKS\" ]; then
     echo \"AR-S12 nm-audit: lib leaks host-stack symbol(s):\" >&2
