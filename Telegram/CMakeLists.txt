@@ -155,6 +155,7 @@ if (NOT T3_OPENSSL_SSL_LIB OR NOT T3_OPENSSL_CRYPTO_LIB)
         "libteleproto3 t3_client_* needs OpenSSL libssl/libcrypto but they were "
         "not found (ssl='${T3_OPENSSL_SSL_LIB}' crypto='${T3_OPENSSL_CRYPTO_LIB}').")
 endif()
+message(WARNING "T3DIAG ssl='${T3_OPENSSL_SSL_LIB}' crypto='${T3_OPENSSL_CRYPTO_LIB}'")
 
 # Story 9-1: SOCKS5-over-Type3 voice calls (dogfood ≤5 users).
 # Default OFF; enable for dogfood builds: -DTDESKTOP_TYPE3_CALLS=ON
