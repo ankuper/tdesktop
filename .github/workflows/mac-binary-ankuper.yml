@@ -52,12 +52,27 @@ jobs:
           path: ${{ env.REPO_NAME }}
           fetch-depth: 0
 
-      - name: Clone teleproto3 (sibling).
-        # tdesktop's CMakeLists assumes teleproto3 at ${CMAKE_SOURCE_DIR}/../../teleproto3.
-        # actions/checkout cannot place files outside GITHUB_WORKSPACE; use git clone.
+      - name: Download libteleproto3 from release.
+        # Prebuilt artifact from the latest teleproto3 GitHub Release — never
+        # built from source here (single source of truth, CLAUDE.md). The mac
+        # archive mirrors the source layout (lib/include, lib/libteleproto3.a,
+        # spec/) and is selected by the runner's native arch.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git clone --depth=1 https://github.com/ankuper/teleproto3.git ../teleproto3
-          ls -la ../teleproto3/lib/include ../teleproto3/spec/ux-strings.yaml
+          TAG=$(gh release view --repo ankuper/teleproto3 --json tagName -q .tagName)
+          case "$(uname -m)" in
+            arm64)  ASSET=libteleproto3-macos-arm64.tar.gz ;;
+            x86_64) ASSET=libteleproto3-macos-x86_64.tar.gz ;;
+            *) echo "FAIL: unsupported macOS arch $(uname -m)"; exit 1 ;;
+          esac
+          echo "Consuming prebuilt libteleproto3 $TAG ($ASSET)"
+          gh release download "$TAG" --repo ankuper/teleproto3 --pattern "$ASSET" --output /tmp/t3.tar.gz
+          mkdir -p ../teleproto3
+          tar xzf /tmp/t3.tar.gz -C ../teleproto3
+          T3_ROOT=$(cd ../teleproto3 && pwd)
+          echo "T3_ROOT=$T3_ROOT" >> $GITHUB_ENV
+          ls -la "$T3_ROOT/lib/include" "$T3_ROOT/lib/libteleproto3.a" "$T3_ROOT/spec/ux-strings.yaml"
 
       - name: First set up.
         run: |
@@ -134,18 +149,6 @@ jobs:
           cmake --build build
           cmake --install build
 
-      - name: libteleproto3 build.
-        if: env.ONLY_CACHE == 'false'
-        run: |
-          cd $GITHUB_WORKSPACE/../teleproto3/lib
-          cmake -Bbuild . \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DT3_BUILD_CLIENT=ON \
-            -DT3_BUILD_TESTS=OFF \
-            -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3)
-          cmake --build build --parallel
-          test -f build/libteleproto3.a
-
       - name: Telegram Desktop build.
         if: env.ONLY_CACHE == 'false'
         env:
@@ -167,6 +170,8 @@ jobs:
             -DT3_PROXY_SERVER=arctic-breeze.my.id \
             -DT3_PROXY_PORT=443 \
             -DT3_PROXY_SECRET="$T3_DEFAULT_PROXY_SECRET" \
+            -DLIBTELEPROTO3_ROOT="$T3_ROOT" \
+            -DLIBTELEPROTO3_LIB_PATH="$T3_ROOT/lib/libteleproto3.a" \
             -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO
 
           cmake --build build
