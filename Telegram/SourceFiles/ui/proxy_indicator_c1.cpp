@@ -14,11 +14,13 @@
 // Catches ABI drift at compile time if libteleproto3 is updated without updating this TU.
 // static_assert (not _Static_assert): this TU is C++, and MSVC's C++ frontend
 // doesn't accept the C11 keyword (GCC/Clang accept it as an extension).
+// Consumers float to the latest teleproto3 release, which couples its ABI
+// version to the lib version and bumps the minor on every release (often for
+// non-ABI reasons). Pin the major only: it changes solely on a real, breaking
+// ABI revision (0.x -> 1.x), which is the case that genuinely needs review here.
 static_assert(
-	T3_ABI_VERSION_MAJOR == 0
-	&& T3_ABI_VERSION_MINOR == 6
-	&& T3_ABI_VERSION_PATCH == 0,
-	"libteleproto3 ABI mismatch — update proxy_indicator_c1.cpp to new ABI");
+	T3_ABI_VERSION_MAJOR == 0,
+	"libteleproto3 major ABI changed — review proxy_indicator_c1.cpp for the new ABI");
 
 #include <QtCore/QFile>
 #include <QtCore/QJsonDocument>

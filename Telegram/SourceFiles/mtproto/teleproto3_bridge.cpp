@@ -13,12 +13,11 @@
 
 #include "mtproto/teleproto3_bridge.h"
 
-// ABI version-pin: updated to lib-v0.6.0 (first release consumed as a prebuilt
-// artifact; the lib couples T3_ABI_VERSION to T3_LIB_VERSION).
-static_assert(T3_ABI_VERSION_MAJOR == 0 &&
-              T3_ABI_VERSION_MINOR == 6 &&
-              T3_ABI_VERSION_PATCH == 0,
-              "Bridge expects lib-v0.6.0; rebuild lib or update macros");
+// ABI version-pin (major only): consumers track the latest teleproto3 release,
+// whose minor bumps on every release (the lib couples ABI to lib version). Only
+// a major bump (0.x -> 1.x) signals a real breaking ABI change worth gating on.
+static_assert(T3_ABI_VERSION_MAJOR == 0,
+              "Bridge requires libteleproto3 ABI major 0.x; review on a major bump");
 
 #include <QtNetwork/QAbstractSocket>
 #include <QCoreApplication>
