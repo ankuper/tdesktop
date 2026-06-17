@@ -39,6 +39,23 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(_t3_yaml  "${LIBTELEPROTO3_ROOT}/spec/ux-strings.yaml")
 set(_t3_hdr   "${CMAKE_CURRENT_SOURCE_DIR}/SourceFiles/lang/lang_keys.h")
 set(_t3_stamp "${CMAKE_CURRENT_BINARY_DIR}/lang_keys_t3.stamp")
+# Patch the header at CONFIGURE time, before Ninja starts compiling anything.
+# On Windows, rewriting a source header in-place during the build races against
+# concurrent cl.exe jobs that hold a read handle on lang_keys.h (sharing
+# violation → "Permission denied"). Running the codegen here means the build-time
+# custom command below finds the file already up-to-date and performs no write.
+execute_process(
+    COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/build/codegen-t3-strings.py"
+            --in    "${_t3_yaml}"
+            --out   "${_t3_hdr}"
+            --stamp "${_t3_stamp}"
+    RESULT_VARIABLE _t3_codegen_rc
+)
+if(NOT _t3_codegen_rc EQUAL 0)
+    message(FATAL_ERROR "codegen-t3-strings failed at configure time (rc=${_t3_codegen_rc})")
+endif()
+
 add_custom_command(
     OUTPUT  "${_t3_stamp}"
     COMMAND "${Python3_EXECUTABLE}"
