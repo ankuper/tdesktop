@@ -13,11 +13,12 @@
 
 #include "mtproto/teleproto3_bridge.h"
 
-// ABI version-pin: updated to lib-v0.2.0 for T3ChatM branded build.
+// ABI version-pin: updated to lib-v0.6.0 (first release consumed as a prebuilt
+// artifact; the lib couples T3_ABI_VERSION to T3_LIB_VERSION).
 static_assert(T3_ABI_VERSION_MAJOR == 0 &&
-              T3_ABI_VERSION_MINOR == 2 &&
+              T3_ABI_VERSION_MINOR == 6 &&
               T3_ABI_VERSION_PATCH == 0,
-              "Bridge expects lib-v0.2.0; rebuild lib or update macros");
+              "Bridge expects lib-v0.6.0; rebuild lib or update macros");
 
 #include <QtNetwork/QAbstractSocket>
 #include <QCoreApplication>
