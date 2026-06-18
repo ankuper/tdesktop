@@ -2,6 +2,7 @@ name: Windows Release (ankuper).
 run-name: Windows Release (ankuper) — ${{ github.event.head_commit.message || 'manual dispatch' }}
 
 on:
+  workflow_call:
   push:
     branches:
       - dev
@@ -242,8 +243,8 @@ jobs:
 
       - name: Upload artifact.
         if: env.UPLOAD_ARTIFACT == 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: Telegram-windows-x64-release-unsigned
           path: artifact\
-          retention-days: 30
+          retention-days: 1

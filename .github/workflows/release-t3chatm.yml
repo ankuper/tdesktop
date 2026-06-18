@@ -1,0 +1,174 @@
+name: T3ChatM Desktop Release
+
+run-name: T3ChatM Release — ${{ github.ref_name || inputs.tag }}
+
+# Triggered by pushing a tag matching t3chatm-vX.Y.Z (e.g. git push origin t3chatm-v0.4.0).
+# Can also be triggered manually via workflow_dispatch to re-publish an existing tag.
+#
+# Calls the three platform build workflows (linux / mac / win) in parallel, then
+# collects their artifacts and publishes a GitHub Release with renamed assets.
+
+on:
+  push:
+    tags:
+      - 't3chatm-v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. t3chatm-v0.4.0) — must already exist in the repo'
+        required: true
+
+jobs:
+
+  build-linux:
+    name: Linux x86_64
+    uses: ./.github/workflows/linux-binary-ankuper.yml
+    secrets: inherit
+    permissions:
+      contents: read
+
+  build-mac-arm64:
+    name: macOS arm64
+    uses: ./.github/workflows/mac-binary-ankuper.yml
+    with:
+      runner: macos-latest
+    secrets: inherit
+    permissions:
+      contents: read
+
+  build-mac-x86_64:
+    name: macOS x86_64 (Intel)
+    uses: ./.github/workflows/mac-binary-ankuper.yml
+    with:
+      runner: macos-13
+    secrets: inherit
+    permissions:
+      contents: read
+
+  build-win:
+    name: Windows x64
+    uses: ./.github/workflows/win-binary-ankuper.yml
+    secrets: inherit
+    permissions:
+      contents: read
+
+  publish:
+    name: Publish GitHub Release
+    needs: [build-linux, build-mac-arm64, build-mac-x86_64, build-win]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Resolve release tag.
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${{ github.ref_name }}"
+          fi
+          echo "RELEASE_TAG=$TAG" >> $GITHUB_ENV
+          echo "RELEASE_VERSION=${TAG#t3chatm-}" >> $GITHUB_ENV
+
+      - name: Download Linux artifact.
+        uses: actions/download-artifact@v4
+        with:
+          name: Telegram-linux-x86_64-release
+          path: dl/linux/
+
+      - name: Download macOS arm64 DMG artifact.
+        uses: actions/download-artifact@v4
+        with:
+          name: Telegram-macOS-arm64-unsigned-dmg
+          path: dl/mac-arm64/
+
+      - name: Download macOS x86_64 DMG artifact.
+        uses: actions/download-artifact@v4
+        with:
+          name: Telegram-macOS-x86_64-unsigned-dmg
+          path: dl/mac-x86_64/
+
+      - name: Download Windows artifact.
+        uses: actions/download-artifact@v4
+        with:
+          name: Telegram-windows-x64-release-unsigned
+          path: dl/win/
+
+      - name: Stage release assets.
+        run: |
+          mkdir -p stage
+          V="$RELEASE_VERSION"
+
+          # Linux — pack binary (+ Updater if present) as a tar.gz; exclude the
+          # SHA256SUMS checksum file (it checksums the pre-rename names, not useful).
+          tar czf "stage/T3ChatM-linux-x86_64-${V}.tar.gz" \
+            --exclude='SHA256SUMS' \
+            -C dl/linux/ .
+          ls -lh "stage/T3ChatM-linux-x86_64-${V}.tar.gz"
+
+          # macOS — rename each arch DMG to the versioned release name
+          DMG_ARM64=$(find dl/mac-arm64/ -name '*.dmg' | head -1)
+          cp "$DMG_ARM64" "stage/T3ChatM-macOS-arm64-unsigned-${V}.dmg"
+          ls -lh "stage/T3ChatM-macOS-arm64-unsigned-${V}.dmg"
+
+          DMG_X86=$(find dl/mac-x86_64/ -name '*.dmg' | head -1)
+          cp "$DMG_X86" "stage/T3ChatM-macOS-x86_64-unsigned-${V}.dmg"
+          ls -lh "stage/T3ChatM-macOS-x86_64-unsigned-${V}.dmg"
+
+          # Windows — copy all .exe files with the version suffix
+          for f in dl/win/*.exe; do
+            NAME=$(basename "$f" .exe)
+            cp "$f" "stage/${NAME}-${V}.exe"
+            ls -lh "stage/${NAME}-${V}.exe"
+          done
+
+          echo ""
+          echo "All staged assets:"
+          ls -lh stage/
+
+      - name: Delete existing release (idempotent re-runs).
+        run: |
+          gh release delete "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --yes 2>/dev/null || true
+
+      - name: Create GitHub Release.
+        run: |
+          ARM_DMG="T3ChatM-macOS-arm64-unsigned-${RELEASE_VERSION}.dmg"
+          DMG_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${ARM_DMG}"
+          # Best-effort auto-generated changelog notes (appended after the install block).
+          gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f tag_name="${RELEASE_TAG}" --jq .body > /tmp/auto_notes.md 2>/dev/null || true
+          # Install block (quoted heredoc keeps backticks/backslashes literal; URL via placeholder).
+          cat > /tmp/release_notes.md <<'NOTES'
+          ## Install on macOS (Apple Silicon)
+
+          The `.dmg` is **unsigned**, so macOS quarantines it and kills the app on first launch
+          (`Killed: 9`) until the quarantine is cleared and an ad-hoc signature is applied.
+          Download, install and launch in one line:
+
+          ```bash
+          curl -L "__DMG_URL__" -o /tmp/T3ChatM.dmg && \
+          hdiutil attach /tmp/T3ChatM.dmg -nobrowse && \
+          rm -rf "/Applications/T3ChatM.app" && \
+          cp -R "/Volumes/T3ChatM/T3ChatM.app" /Applications/ && \
+          xattr -cr "/Applications/T3ChatM.app" && \
+          codesign --force --deep --sign - "/Applications/T3ChatM.app" && \
+          hdiutil detach "/Volumes/T3ChatM" && \
+          open "/Applications/T3ChatM.app"
+          ```
+
+          `xattr -cr` clears the download quarantine; `codesign --force --deep --sign -` applies
+          an ad-hoc signature (required on Apple Silicon for an unsigned app). If Gatekeeper still
+          warns, right-click the app → Open once.
+
+          ---
+
+          NOTES
+          sed -i.bak "s#__DMG_URL__#${DMG_URL}#g" /tmp/release_notes.md && rm -f /tmp/release_notes.md.bak
+          cat /tmp/auto_notes.md >> /tmp/release_notes.md
+          gh release create "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "T3ChatM ${RELEASE_VERSION}" \
+            --notes-file /tmp/release_notes.md \
+            stage/*

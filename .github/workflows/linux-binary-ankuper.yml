@@ -13,6 +13,7 @@ run-name: Linux binary (ankuper) — ${{ github.event.head_commit.message || 'ma
 
 on:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -127,6 +128,7 @@ jobs:
             -D T3_PROXY_PORT=443 \
             -D T3_PROXY_SECRET=$T3_DEFAULT_PROXY_SECRET \
             -D LIBTELEPROTO3_ROOT=/usr/src/teleproto3 \
+            -D LIBTELEPROTO3_LIB_PATH=/usr/src/teleproto3/lib/libteleproto3.a \
             -D TDESKTOP_LAUNCHER_BASENAME=org.ankuper.tdesktop \
             -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON \
             -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON
@@ -159,3 +161,4 @@ jobs:
           name: Telegram-linux-x86_64-release
           path: out/Release/artifact/
           if-no-files-found: error
+          retention-days: 1
