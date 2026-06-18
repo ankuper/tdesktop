@@ -2,6 +2,7 @@ name: Windows Release (ankuper).
 run-name: Windows Release (ankuper) — ${{ github.event.head_commit.message || 'manual dispatch' }}
 
 on:
+  workflow_call:
   push:
     branches:
       - dev
@@ -56,12 +57,23 @@ jobs:
           submodules: recursive
           path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
 
-      - name: Clone teleproto3 (sibling).
-        uses: actions/checkout@v6
-        with:
-          repository: ankuper/teleproto3
-          path: ${{ env.TBUILD }}\teleproto3
-          fetch-depth: 1
+      - name: Download libteleproto3 from release.
+        # Prebuilt artifact from the latest teleproto3 GitHub Release — never
+        # built from source here (single source of truth, CLAUDE.md). The win
+        # zip mirrors the source layout (lib\include, lib\teleproto3.lib, spec\).
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = gh release view --repo ankuper/teleproto3 --json tagName -q .tagName
+          Write-Host "Consuming prebuilt libteleproto3 $tag (windows-x86_64)"
+          gh release download "$tag" --repo ankuper/teleproto3 `
+            --pattern 'libteleproto3-windows-x86_64.zip' --output "$env:RUNNER_TEMP\t3.zip"
+          $root = "$env:TBUILD\teleproto3"
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          Expand-Archive -Path "$env:RUNNER_TEMP\t3.zip" -DestinationPath $root -Force
+          Get-Item "$root\lib\teleproto3.lib","$root\lib\include\t3.h","$root\spec\ux-strings.yaml" | Select-Object FullName,Length
+          "LIBTELEPROTO3_LIB_PATH=$root\lib\teleproto3.lib" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: First set up.
         shell: bash
@@ -197,27 +209,6 @@ jobs:
           echo "OPENSSL3_DIR=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "OpenSSL located at $root (include=$root\include, libs=$root\out)"
 
-      - name: libteleproto3 build (MSVC x64, against tdesktop's OpenSSL, /MT).
-        if: env.ONLY_CACHE == 'false'
-        shell: cmd
-        run: |
-          cd %TBUILD%\teleproto3\lib
-          cmake -B build -G "Ninja" ^
-            -DCMAKE_BUILD_TYPE=Release ^
-            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded ^
-            -DT3_BUILD_CLIENT=ON ^
-            -DT3_BUILD_TESTS=OFF ^
-            -DOPENSSL_INCLUDE_DIR="%OPENSSL3_DIR%\include" ^
-            -DOPENSSL_CRYPTO_LIBRARY="%OPENSSL3_DIR%\out\libcrypto.lib" ^
-            -DOPENSSL_SSL_LIBRARY="%OPENSSL3_DIR%\out\libssl.lib"
-          cmake --build build --parallel
-          if not exist build\teleproto3.lib (
-            echo FAIL: teleproto3.lib not produced
-            dir build
-            exit /b 1
-          )
-          echo LIBTELEPROTO3_LIB_PATH=%TBUILD%\teleproto3\lib\build\teleproto3.lib>>%GITHUB_ENV%
-
       - name: Free up some disk space.
         shell: bash
         run: find $LibrariesPath '(' '(' ! '(' -name '*.lib' -o -name '*.a' -o -name '*.exe' -o -name '*.h' -o -name '*.hpp' -o -name '*.inc' -o -name '*.cmake' -o -path '*/include/*' -o -path '*/objects-*' -o -path '*/cache_keys/*' -o -path '*/patches/*' ')' -type f ')' -o -empty ')' -delete
@@ -265,8 +256,8 @@ jobs:
 
       - name: Upload artifact.
         if: env.UPLOAD_ARTIFACT == 'true'
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: Telegram-windows-x64-release-unsigned
           path: artifact\
-          retention-days: 30
+          retention-days: 1

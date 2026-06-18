@@ -13,6 +13,7 @@ run-name: Linux binary (ankuper) — ${{ github.event.head_commit.message || 'ma
 
 on:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -31,14 +32,22 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Clone teleproto3 sibling.
-        # Story 2-7 / Telegram/CMakeLists.txt:86-106 requires the
-        # teleproto3 source tree at ${CMAKE_SOURCE_DIR}/../../teleproto3
-        # (i.e. as a workspace sibling of tdesktop). actions/checkout
-        # cannot place files outside GITHUB_WORKSPACE; use git clone.
+      - name: Download libteleproto3 from release.
+        # libteleproto3 is consumed as a prebuilt artifact from the latest
+        # teleproto3 GitHub Release — never built from source here (single
+        # source of truth, CLAUDE.md release rule). The archive mirrors the
+        # source-tree layout (lib/include, lib/libteleproto3.a, spec/) so the
+        # extracted tree is a drop-in LIBTELEPROTO3_ROOT.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git clone --depth=1 https://github.com/ankuper/teleproto3.git ../teleproto3
-          ls -la ../teleproto3/lib/include
+          TAG=$(gh release view --repo ankuper/teleproto3 --json tagName -q .tagName)
+          echo "Consuming prebuilt libteleproto3 $TAG (linux-x86_64)"
+          gh release download "$TAG" --repo ankuper/teleproto3 \
+            --pattern 'libteleproto3-linux-x86_64.tar.gz' --output /tmp/t3.tar.gz
+          mkdir -p ../teleproto3
+          tar xzf /tmp/t3.tar.gz -C ../teleproto3
+          ls -la ../teleproto3/lib/include ../teleproto3/lib/libteleproto3.a ../teleproto3/spec/ux-strings.yaml
 
       - name: First set up.
         run: |
@@ -81,23 +90,6 @@ jobs:
           rm -rf ${{ runner.temp }}/.buildx-cache
           mv ${{ runner.temp }}/.buildx-cache{-new,}
 
-      - name: Build libteleproto3.a (Linux reference toolchain).
-        run: |
-          docker run --rm \
-            -u $(id -u) \
-            -v $(realpath ..)/teleproto3:/usr/src/teleproto3 \
-            -w /usr/src/teleproto3 \
-            $IMAGE_TAG \
-            bash -c "
-              cmake -S lib -B lib/build \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DT3_CSPRNG_BACKEND=linux \
-                -DT3_BUILD_CLIENT=ON \
-                -DT3_BUILD_TESTS=OFF && \
-              cmake --build lib/build --config Release
-            "
-          ls -la ../teleproto3/lib/build/libteleproto3.a
-
       - name: Patch ThirdParty dispatch (suppress Wsign-conversion in event_epoll.c).
         # dispatch/DispatchCompilerWarnings.cmake enables -Wsign-conversion -Werror.
         # event_epoll.c:92 returns int & ~int as uint32_t — harmless, but clang errors.
@@ -134,6 +126,7 @@ jobs:
             -D T3_PROXY_PORT=443 \
             -D T3_PROXY_SECRET=$T3_DEFAULT_PROXY_SECRET \
             -D LIBTELEPROTO3_ROOT=/usr/src/teleproto3 \
+            -D LIBTELEPROTO3_LIB_PATH=/usr/src/teleproto3/lib/libteleproto3.a \
             -D TDESKTOP_LAUNCHER_BASENAME=org.ankuper.tdesktop \
             -D DESKTOP_APP_DISABLE_AUTOUPDATE=ON \
             -D DESKTOP_APP_DISABLE_CRASH_REPORTS=ON
@@ -166,3 +159,4 @@ jobs:
           name: Telegram-linux-x86_64-release
           path: out/Release/artifact/
           if-no-files-found: error
+          retention-days: 1

@@ -141,6 +141,9 @@ set_target_properties(teleproto3 PROPERTIES
     # the imported target so libssl+libcrypto come AFTER teleproto3.a in link order.
     INTERFACE_LINK_LIBRARIES         "desktop-app::external_openssl"
 )
+# T3ChatM brand: Generate t3_default_proxy.gen.h from .credentials (gitignored).
+include(${CMAKE_CURRENT_SOURCE_DIR}/generate_default_proxy.cmake)
+target_include_directories(Telegram PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/gen)
 
 
 # Link teleproto3 to td_mtproto so that mtproto_proxy_data.cpp can find t3.h
@@ -2312,9 +2315,9 @@ else()
 endif()
 
 if (build_macstore)
-    set(bundle_identifier "org.telegram.desktop")
+    set(bundle_identifier "com.t3chatm.desktop")
     set(bundle_entitlements "Telegram Lite.entitlements")
-    set(output_name "Telegram Lite")
+    set(output_name "T3ChatM")
     target_link_options(Telegram
     PRIVATE
         -F${libs_loc}/breakpad/src/client/mac/build/Release
@@ -2330,12 +2333,12 @@ if (build_macstore)
     )
 else()
     if (CMAKE_GENERATOR STREQUAL Xcode)
-        set(bundle_identifier "com.tdesktop.Telegram$<$<CONFIG:Debug>:Debug>")
+        set(bundle_identifier "com.t3chatm.desktop$<$<CONFIG:Debug>:Debug>")
     else()
-        set(bundle_identifier "com.tdesktop.Telegram")
+        set(bundle_identifier "com.t3chatm.desktop")
     endif()
     set(bundle_entitlements "Telegram.entitlements")
-    set(output_name "Telegram")
+    set(output_name "T3ChatM")
 endif()
 
 if (CMAKE_GENERATOR STREQUAL Xcode)
