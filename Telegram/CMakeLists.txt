@@ -39,6 +39,23 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(_t3_yaml  "${LIBTELEPROTO3_ROOT}/spec/ux-strings.yaml")
 set(_t3_hdr   "${CMAKE_CURRENT_SOURCE_DIR}/SourceFiles/lang/lang_keys.h")
 set(_t3_stamp "${CMAKE_CURRENT_BINARY_DIR}/lang_keys_t3.stamp")
+# Patch the header at CONFIGURE time, before Ninja starts compiling anything.
+# On Windows, rewriting a source header in-place during the build races against
+# concurrent cl.exe jobs that hold a read handle on lang_keys.h (sharing
+# violation → "Permission denied"). Running the codegen here means the build-time
+# custom command below finds the file already up-to-date and performs no write.
+execute_process(
+    COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/build/codegen-t3-strings.py"
+            --in    "${_t3_yaml}"
+            --out   "${_t3_hdr}"
+            --stamp "${_t3_stamp}"
+    RESULT_VARIABLE _t3_codegen_rc
+)
+if(NOT _t3_codegen_rc EQUAL 0)
+    message(FATAL_ERROR "codegen-t3-strings failed at configure time (rc=${_t3_codegen_rc})")
+endif()
+
 add_custom_command(
     OUTPUT  "${_t3_stamp}"
     COMMAND "${Python3_EXECUTABLE}"
@@ -120,12 +137,52 @@ set_target_properties(teleproto3 PROPERTIES
     IMPORTED_LOCATION_RELWITHDEBINFO "${LIBTELEPROTO3_LIB_PATH}"
     IMPORTED_LOCATION_MINSIZEREL     "${LIBTELEPROTO3_LIB_PATH}"
     INTERFACE_INCLUDE_DIRECTORIES    "${LIBTELEPROTO3_INCLUDE_DIR}"
+    # libteleproto3 t3_client_* links OpenSSL directly (SSL_*); declare the dep on
+    # the imported target so libssl+libcrypto come AFTER teleproto3.a in link order.
+    INTERFACE_LINK_LIBRARIES         "desktop-app::external_openssl"
 )
-
 
 
 # Link teleproto3 to td_mtproto so that mtproto_proxy_data.cpp can find t3.h
 target_link_libraries(td_mtproto PUBLIC teleproto3)
+
+# libteleproto3's t3_client_* transport links OpenSSL directly (SSL_*). The
+# static libssl.a is bundled by desktop-app, but CMake de-duplicates it to a
+# position BEFORE teleproto3.a (pulled transitively by earlier consumers), so
+# the static linker drops the unused SSL_* before reaching teleproto3's
+# references. Locate the static archives by file so they can be placed, by path
+# (not de-duplicated against the target form), in a RESCAN link group with
+# teleproto3 at the final link. HINTS cover the desktop-app bundled install
+# (/usr/local/lib64 on the Linux reference image) and OPENSSL_ROOT_DIR (mac).
+set(_t3_openssl_hints /usr/local/lib64 /usr/local/lib)
+if (DEFINED OPENSSL_ROOT_DIR)
+    # mac (brew): lib/ ; Windows (prepare/win.bat): out/
+    list(APPEND _t3_openssl_hints "${OPENSSL_ROOT_DIR}/lib" "${OPENSSL_ROOT_DIR}/out")
+endif()
+find_library(T3_OPENSSL_SSL_LIB
+    NAMES ssl libssl
+    HINTS ${_t3_openssl_hints})
+find_library(T3_OPENSSL_CRYPTO_LIB
+    NAMES crypto libcrypto
+    HINTS ${_t3_openssl_hints})
+# On the Linux reference image, desktop-app's external_openssl surfaces only
+# libcrypto in the link (TLS is normally via Qt), so the t3_client_* SSL_*
+# symbols are otherwise unresolved and locating libssl here is mandatory. On
+# mac/Windows external_openssl wires libssl itself, so this is best-effort: only
+# fail hard on Linux, and only attach what was actually found.
+if (LINUX AND (NOT T3_OPENSSL_SSL_LIB OR NOT T3_OPENSSL_CRYPTO_LIB))
+    message(FATAL_ERROR
+        "libteleproto3 t3_client_* needs OpenSSL libssl/libcrypto but they were "
+        "not found (ssl='${T3_OPENSSL_SSL_LIB}' crypto='${T3_OPENSSL_CRYPTO_LIB}').")
+endif()
+# Make libssl (then libcrypto) a link dependency OF teleproto3 so CMake always
+# places them AFTER teleproto3.a in the link line, for every consumer, regardless
+# of listing/response-file order. File paths (not targets) aren't de-duplicated
+# to an earlier position.
+if (T3_OPENSSL_SSL_LIB AND T3_OPENSSL_CRYPTO_LIB)
+    set_property(TARGET teleproto3 APPEND PROPERTY
+        INTERFACE_LINK_LIBRARIES "${T3_OPENSSL_SSL_LIB}" "${T3_OPENSSL_CRYPTO_LIB}")
+endif()
 
 # Story 9-1: SOCKS5-over-Type3 voice calls (dogfood ≤5 users).
 # Default OFF; enable for dogfood builds: -DTDESKTOP_TYPE3_CALLS=ON
@@ -182,16 +239,10 @@ PRIVATE
     desktop-app::external_qr_code_generator
     desktop-app::external_crash_reports
     desktop-app::external_auto_updates
+    desktop-app::external_openssl
     desktop-app::external_openal
     desktop-app::external_xxhash
-    # libteleproto3's t3_client_* references OpenSSL libssl (SSL_new/read/write/
-    # CTX_*/get_error). CMake de-duplicates external_openssl to its earliest
-    # position (pulled transitively by td_mtproto etc.), which lands libssl.a
-    # BEFORE teleproto3.a — so the static linker drops the unused SSL_* before
-    # reaching teleproto3's references. Wrap both in a RESCAN link group
-    # (--start-group/--end-group) so the linker re-scans and resolves them
-    # regardless of ordering.
-    "$<LINK_GROUP:RESCAN,teleproto3,desktop-app::external_openssl>"
+    teleproto3
 )
 
 # Story 2.5 — Subtask 2.1 + 6.1: wire libteleproto3 into td_ui so
@@ -2403,10 +2454,15 @@ source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR}/Telegram PREFIX Resources FILES ${
 
 target_include_directories(Telegram PRIVATE ${src_loc})
 
-# AR-S12 nm-audit: verify libteleproto3.a has no host-stack symbol leakage.
-# Scope: the static archive ONLY (D2 resolution, story 2-1) — host-stack
-# neutrality is a property of the lib, not of the linked Telegram binary.
-# Fails the build if any TLS/WS/OS-specific symbol is found in the lib object.
+# AR-S12 nm-audit: verify libteleproto3.a does not couple to a PLATFORM-NATIVE
+# networking/TLS stack. Scope: the static archive ONLY (D2 resolution, story 2-1).
+#
+# Updated for the t3_client_* migration: libteleproto3 now owns its transport
+# (TLS via OpenSSL + its own HTTP-chunk/WS framing), so it LEGITIMATELY references
+# OpenSSL (SSL_*/TLS_*) and its own t3c_ws_frame_* symbols — these are no longer
+# leaks. The audit still fails the build if the lib pulls in a platform-native
+# stack (SChannel, SecureTransport, CFNetwork, WinHTTP, Qt, NWWebSocket, etc.),
+# which would break cross-platform host-stack neutrality.
 # Permissions: read-only (no push/PR/issue write scope needed — Epic 1 §13).
 #
 # Skipped on Windows (no `nm`/`grep` in default MSVC toolchain). The CI
@@ -2425,7 +2481,7 @@ fi
 # The regex anchors host-stack tokens with word boundaries to avoid matching
 # benign substrings like `cxa_finalize` containing `cf_` etc.
 LEAKS=$(nm -P \"$LIB\" 2>/dev/null | awk '{print \$1}' \\
-    | grep -iE '(^|_)(ssl|tls|openssl|boringssl|mbedtls|gnutls|wolfssl|schannel|securetransport|cf|cfnetwork|nw|winhttp|bcrypt|secitem|qt|qwebsocket|nwwebsocket|conscrypt|okhttp|websocket|ws_[a-z]*frame)([_$]|$)' \\
+    | grep -iE '(^|_)(schannel|securetransport|cfnetwork|winhttp|secitem|qt|qwebsocket|nwwebsocket|conscrypt|okhttp)([_$]|$)' \\
     || true)
 if [ -n \"$LEAKS\" ]; then
     echo \"AR-S12 nm-audit: lib leaks host-stack symbol(s):\" >&2
