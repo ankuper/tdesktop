@@ -138,6 +138,11 @@ private:
 	t3_client_stream *_client = nullptr;
 	int _clientFd = -1;
 	QSocketNotifier *_readNotifier = nullptr;
+	// A non-blocking connect/TLS write completes via writability, so we also
+	// watch the fd for writability until the stream reaches READY — otherwise the
+	// connect phase deadlocks (never readable until we send, never send until
+	// the connect is pumped). Disabled once READY to avoid a busy event loop.
+	QSocketNotifier *_writeNotifier = nullptr;
 
 	// Pending queue: messages buffered while Connecting or on proxy switch.
 	// Bound by Story 2.3 Task 6; align with AR-S3 once frozen.

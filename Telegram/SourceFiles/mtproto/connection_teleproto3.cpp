@@ -283,10 +283,16 @@ void ConnectionTeleproto3::doConnect() {
 		return;
 	}
 
-	// Drive the client fd. The library pumps its own state machine on readability;
-	// the initial TLS connect may already be writable, so kick it once below.
+	// Drive the client fd. The library pumps its own state machine; readability
+	// advances reads, but a non-blocking connect completes via WRITABILITY, so we
+	// watch both. Without the write watcher the connect/TLS phase deadlocks: the fd
+	// never becomes readable until we send the ClientHello, and we never send it
+	// until the completed connect is pumped on a writability event.
 	_readNotifier = new QSocketNotifier(_clientFd, QSocketNotifier::Read, this);
 	QObject::connect(_readNotifier, &QSocketNotifier::activated,
+		this, &ConnectionTeleproto3::onClientReadable);
+	_writeNotifier = new QSocketNotifier(_clientFd, QSocketNotifier::Write, this);
+	QObject::connect(_writeNotifier, &QSocketNotifier::activated,
 		this, &ConnectionTeleproto3::onClientReadable);
 
 	// Start the ping clock; promotion to Ready computes the delta (see onClientReadable).
@@ -309,6 +315,13 @@ void ConnectionTeleproto3::onClientReadable() {
 			+ QString::fromUtf8(t3_client_last_error(_client)));
 		handleTransportError();
 		return;
+	}
+
+	// The write watcher is only needed until the stream is up: it fires the pump
+	// when the non-blocking connect/TLS write becomes possible. Once READY the fd
+	// is almost always writable, so disable it to avoid spinning the event loop.
+	if (_writeNotifier) {
+		_writeNotifier->setEnabled(st != T3_CLIENT_STATE_READY);
 	}
 
 	if (_status == Status::Connecting && st == T3_CLIENT_STATE_READY) {
@@ -531,6 +544,11 @@ void ConnectionTeleproto3::teardownSession() {
 		_readNotifier->setEnabled(false);
 		_readNotifier->deleteLater();
 		_readNotifier = nullptr;
+	}
+	if (_writeNotifier) {
+		_writeNotifier->setEnabled(false);
+		_writeNotifier->deleteLater();
+		_writeNotifier = nullptr;
 	}
 	if (_client) {
 		t3_client_destroy(_client);
