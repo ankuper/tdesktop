@@ -1,5 +1,31 @@
 # [Telegram Desktop][telegram_desktop] – Official Messenger
 
+## T3ChatM — install on macOS (Apple Silicon)
+
+T3ChatM ships an **unsigned** `.dmg`, so macOS quarantines it and kills the app on
+first launch (`Killed: 9`) until the quarantine is cleared and an ad-hoc signature is
+applied. Download the latest release, install and launch in one line:
+
+```bash
+DMG=$(curl -fsSL https://api.github.com/repos/ankuper/tdesktop/releases/latest \
+  | grep -o 'https://[^"]*macOS-arm64[^"]*\.dmg' | head -1)
+curl -L "$DMG" -o /tmp/T3ChatM.dmg && \
+hdiutil attach /tmp/T3ChatM.dmg -nobrowse && \
+rm -rf "/Applications/T3ChatM.app" && \
+cp -R "/Volumes/T3ChatM/T3ChatM.app" /Applications/ && \
+xattr -cr "/Applications/T3ChatM.app" && \
+codesign --force --deep --sign - "/Applications/T3ChatM.app" && \
+hdiutil detach "/Volumes/T3ChatM" && \
+open "/Applications/T3ChatM.app"
+```
+
+- `xattr -cr` removes the download quarantine.
+- `codesign --force --deep --sign -` applies an **ad-hoc** signature — required on
+  Apple Silicon to run an unsigned app (without it the app is killed: `Killed: 9`).
+- All releases: <https://github.com/ankuper/tdesktop/releases>
+
+---
+
 This is the complete source code and the build instructions for the official [Telegram][telegram] messenger desktop client, based on the [Telegram API][telegram_api] and the [MTProto][telegram_proto] secure protocol.
 
 [![Version](https://badge.fury.io/gh/telegramdesktop%2Ftdesktop.svg)](https://github.com/telegramdesktop/tdesktop/releases)
