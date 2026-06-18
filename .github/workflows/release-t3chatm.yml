@@ -54,7 +54,11 @@ jobs:
 
   publish:
     name: Publish GitHub Release
-    needs: [build-linux, build-mac-arm64, build-mac-x86_64, build-win]
+    # Intel (build-mac-x86_64) is intentionally NOT a hard dependency: GitHub's
+    # macos-13 Intel runners can sit queued for hours, which used to block the
+    # whole release. Publish as soon as arm64/win/linux are ready; the Intel DMG
+    # is attached best-effort if it finished in time (see the guarded steps below).
+    needs: [build-linux, build-mac-arm64, build-win]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -84,7 +88,8 @@ jobs:
           name: Telegram-macOS-arm64-unsigned-dmg
           path: dl/mac-arm64/
 
-      - name: Download macOS x86_64 DMG artifact.
+      - name: Download macOS x86_64 DMG artifact (best-effort — Intel may be skipped).
+        continue-on-error: true
         uses: actions/download-artifact@v4
         with:
           name: Telegram-macOS-x86_64-unsigned-dmg
@@ -113,9 +118,15 @@ jobs:
           cp "$DMG_ARM64" "stage/T3ChatM-macOS-arm64-unsigned-${V}.dmg"
           ls -lh "stage/T3ChatM-macOS-arm64-unsigned-${V}.dmg"
 
-          DMG_X86=$(find dl/mac-x86_64/ -name '*.dmg' | head -1)
-          cp "$DMG_X86" "stage/T3ChatM-macOS-x86_64-unsigned-${V}.dmg"
-          ls -lh "stage/T3ChatM-macOS-x86_64-unsigned-${V}.dmg"
+          # Intel DMG is best-effort: attach it only if the (often-queued) Intel
+          # build actually produced one; otherwise publish without it.
+          DMG_X86=$(find dl/mac-x86_64/ -name '*.dmg' 2>/dev/null | head -1)
+          if [ -n "$DMG_X86" ]; then
+            cp "$DMG_X86" "stage/T3ChatM-macOS-x86_64-unsigned-${V}.dmg"
+            ls -lh "stage/T3ChatM-macOS-x86_64-unsigned-${V}.dmg"
+          else
+            echo "::warning::No Intel (x86_64) DMG — publishing without it (runner likely unavailable)."
+          fi
 
           # Windows — copy all .exe files with the version suffix
           for f in dl/win/*.exe; do
