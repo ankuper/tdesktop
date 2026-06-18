@@ -13,6 +13,7 @@ run-name: Linux binary (ankuper) — ${{ github.event.head_commit.message || 'ma
 
 on:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -158,3 +159,4 @@ jobs:
           name: Telegram-linux-x86_64-release
           path: out/Release/artifact/
           if-no-files-found: error
+          retention-days: 1
