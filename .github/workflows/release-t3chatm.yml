@@ -27,9 +27,20 @@ jobs:
     permissions:
       contents: read
 
-  build-mac:
+  build-mac-arm64:
     name: macOS arm64
     uses: ./.github/workflows/mac-binary-ankuper.yml
+    with:
+      runner: macos-latest
+    secrets: inherit
+    permissions:
+      contents: read
+
+  build-mac-x86_64:
+    name: macOS x86_64 (Intel)
+    uses: ./.github/workflows/mac-binary-ankuper.yml
+    with:
+      runner: macos-13
     secrets: inherit
     permissions:
       contents: read
@@ -43,7 +54,7 @@ jobs:
 
   publish:
     name: Publish GitHub Release
-    needs: [build-linux, build-mac, build-win]
+    needs: [build-linux, build-mac-arm64, build-mac-x86_64, build-win]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -67,11 +78,17 @@ jobs:
           name: Telegram-linux-x86_64-release
           path: dl/linux/
 
-      - name: Download macOS DMG artifact.
+      - name: Download macOS arm64 DMG artifact.
         uses: actions/download-artifact@v4
         with:
-          name: Telegram-macOS-unsigned-dmg
-          path: dl/mac/
+          name: Telegram-macOS-arm64-unsigned-dmg
+          path: dl/mac-arm64/
+
+      - name: Download macOS x86_64 DMG artifact.
+        uses: actions/download-artifact@v4
+        with:
+          name: Telegram-macOS-x86_64-unsigned-dmg
+          path: dl/mac-x86_64/
 
       - name: Download Windows artifact.
         uses: actions/download-artifact@v4
@@ -91,10 +108,14 @@ jobs:
             -C dl/linux/ .
           ls -lh "stage/T3ChatM-linux-x86_64-${V}.tar.gz"
 
-          # macOS — rename the DMG to the versioned release name
-          DMG=$(find dl/mac/ -name '*.dmg' | head -1)
-          cp "$DMG" "stage/T3ChatM-macOS-arm64-unsigned-${V}.dmg"
+          # macOS — rename each arch DMG to the versioned release name
+          DMG_ARM64=$(find dl/mac-arm64/ -name '*.dmg' | head -1)
+          cp "$DMG_ARM64" "stage/T3ChatM-macOS-arm64-unsigned-${V}.dmg"
           ls -lh "stage/T3ChatM-macOS-arm64-unsigned-${V}.dmg"
+
+          DMG_X86=$(find dl/mac-x86_64/ -name '*.dmg' | head -1)
+          cp "$DMG_X86" "stage/T3ChatM-macOS-x86_64-unsigned-${V}.dmg"
+          ls -lh "stage/T3ChatM-macOS-x86_64-unsigned-${V}.dmg"
 
           # Windows — copy all .exe files with the version suffix
           for f in dl/win/*.exe; do

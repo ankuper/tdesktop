@@ -3,6 +3,11 @@ run-name: MacOS Release (ankuper) — ${{ github.event.head_commit.message || 'm
 
 on:
   workflow_call:
+    inputs:
+      runner:
+        type: string
+        default: 'macos-latest'
+        description: 'GitHub Actions runner label (e.g. macos-latest, macos-13)'
   push:
     branches:
       - dev
@@ -28,14 +33,13 @@ jobs:
 
   macos:
     name: MacOS Release (unsigned)
-    runs-on: macos-latest
+    runs-on: ${{ inputs.runner || 'macos-latest' }}
 
     env:
       GIT: "https://github.com"
       CMAKE_GENERATOR: "Ninja"
       CMAKE_BUILD_TYPE: "Release"
       CMAKE_BUILD_PARALLEL_LEVEL: ""
-      CMAKE_PREFIX_PATH: "/opt/homebrew/opt/ffmpeg@6:/opt/homebrew/opt/openal-soft"
       TDE2E: "51743dfd01dff6179e2d8f7095729caa4e2222e9"
       UPLOAD_ARTIFACT: "true"
       ONLY_CACHE: "false"
@@ -81,7 +85,16 @@ jobs:
           brew upgrade || true
           brew install ada-url autoconf automake boost cmake ffmpeg@6 jpeg-xl libavif libheif libtool openal-soft openh264 openssl opus ninja pkg-config python qtbase qtimageformats qtsvg xz || true
           sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-          sudo sed -i '' '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/ -g//' /opt/homebrew/share/cmake/Modules/Compiler/GNU.cmake
+
+          # brew --prefix differs between Apple Silicon (/opt/homebrew) and Intel (/usr/local)
+          BREW_PREFIX=$(brew --prefix)
+          sudo sed -i '' '/CMAKE_${lang}_FLAGS_DEBUG_INIT/s/ -g//' \
+            "$BREW_PREFIX/share/cmake/Modules/Compiler/GNU.cmake"
+
+          # CMAKE_PREFIX_PATH for brew-installed dependencies — arch-specific
+          echo "CMAKE_PREFIX_PATH=$BREW_PREFIX/opt/ffmpeg@6:$BREW_PREFIX/opt/openal-soft" >> $GITHUB_ENV
+          # RUNNER_ARCH_LOWER: arm64 or x86_64 — used in artifact names
+          echo "RUNNER_ARCH_LOWER=$(uname -m)" >> $GITHUB_ENV
 
           xcodebuild -version > CACHE_KEY.txt
           brew list --versions >> CACHE_KEY.txt
@@ -92,7 +105,9 @@ jobs:
           fi
           echo "CACHE_KEY=`md5 -q CACHE_KEY.txt`" >> $GITHUB_ENV
 
-          echo "MACOSX_DEPLOYMENT_TARGET=$(grep 'set(QT_SUPPORTED_MIN_MACOS_VERSION' /opt/homebrew/Cellar/qtbase/*/lib/cmake/Qt6/Qt6ConfigExtras.cmake | sed -E 's/^.*"(.*)"\)$/\1/')" >> $GITHUB_ENV
+          echo "MACOSX_DEPLOYMENT_TARGET=$(grep 'set(QT_SUPPORTED_MIN_MACOS_VERSION' \
+            "$BREW_PREFIX/Cellar/qtbase/"*/lib/cmake/Qt6/Qt6ConfigExtras.cmake | \
+            sed -E 's/^.*"(.*)"\)$/\1/')" >> $GITHUB_ENV
           echo "LibrariesPath=`pwd`" >> $GITHUB_ENV
 
           echo "RNNOISE=`curl -sSL --header 'Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}' https://api.github.com/repos/xiph/rnnoise/git/refs/heads/master | jq -r .object.sha`" >> $GITHUB_ENV
@@ -198,7 +213,7 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: Telegram-macOS-unsigned-dmg
+          name: Telegram-macOS-${{ env.RUNNER_ARCH_LOWER }}-unsigned-dmg
           path: ${{ env.DMG_PATH }}
           retention-days: 1
 
@@ -206,6 +221,6 @@ jobs:
         if: env.UPLOAD_ARTIFACT == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: Telegram-macOS-unsigned-app
+          name: Telegram-macOS-${{ env.RUNNER_ARCH_LOWER }}-unsigned-app
           path: ${{ env.REPO_NAME }}/${{ env.APP_BUNDLE }}
           retention-days: 1
