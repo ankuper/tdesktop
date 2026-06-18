@@ -190,8 +190,19 @@ def patch_lang_keys(header_path: Path, new_section: str) -> bool:
     )
     if new_text == text:
         return False
-    header_path.write_text(new_text, encoding="utf-8")
-    return True
+    # On Windows a concurrent compiler job may hold a read handle on the header,
+    # turning the write into a sharing violation (PermissionError). Retry briefly;
+    # the contending handle is short-lived (one TU's compile).
+    import time
+    last_err = None
+    for attempt in range(10):
+        try:
+            header_path.write_text(new_text, encoding="utf-8")
+            return True
+        except PermissionError as err:  # noqa: PERF203
+            last_err = err
+            time.sleep(0.2 * (attempt + 1))
+    raise last_err
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
