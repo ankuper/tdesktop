@@ -134,8 +134,41 @@ jobs:
 
       - name: Create GitHub Release.
         run: |
+          ARM_DMG="T3ChatM-macOS-arm64-unsigned-${RELEASE_VERSION}.dmg"
+          DMG_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/${ARM_DMG}"
+          # Best-effort auto-generated changelog notes (appended after the install block).
+          gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+            -f tag_name="${RELEASE_TAG}" --jq .body > /tmp/auto_notes.md 2>/dev/null || true
+          # Install block (quoted heredoc keeps backticks/backslashes literal; URL via placeholder).
+          cat > /tmp/release_notes.md <<'NOTES'
+          ## Install on macOS (Apple Silicon)
+
+          The `.dmg` is **unsigned**, so macOS quarantines it and kills the app on first launch
+          (`Killed: 9`) until the quarantine is cleared and an ad-hoc signature is applied.
+          Download, install and launch in one line:
+
+          ```bash
+          curl -L "__DMG_URL__" -o /tmp/T3ChatM.dmg && \
+          hdiutil attach /tmp/T3ChatM.dmg -nobrowse && \
+          rm -rf "/Applications/T3ChatM.app" && \
+          cp -R "/Volumes/T3ChatM/T3ChatM.app" /Applications/ && \
+          xattr -cr "/Applications/T3ChatM.app" && \
+          codesign --force --deep --sign - "/Applications/T3ChatM.app" && \
+          hdiutil detach "/Volumes/T3ChatM" && \
+          open "/Applications/T3ChatM.app"
+          ```
+
+          `xattr -cr` clears the download quarantine; `codesign --force --deep --sign -` applies
+          an ad-hoc signature (required on Apple Silicon for an unsigned app). If Gatekeeper still
+          warns, right-click the app → Open once.
+
+          ---
+
+          NOTES
+          sed -i.bak "s#__DMG_URL__#${DMG_URL}#g" /tmp/release_notes.md && rm -f /tmp/release_notes.md.bak
+          cat /tmp/auto_notes.md >> /tmp/release_notes.md
           gh release create "$RELEASE_TAG" \
             --repo "$GITHUB_REPOSITORY" \
             --title "T3ChatM ${RELEASE_VERSION}" \
-            --generate-notes \
+            --notes-file /tmp/release_notes.md \
             stage/*
