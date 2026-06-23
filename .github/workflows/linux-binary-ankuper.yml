@@ -19,6 +19,9 @@ permissions:
 
 env:
   IMAGE_TAG: tdesktop:centos_env
+  # Consume the prebuilt libteleproto3 from the teleproto3 release instead of
+  # building it from source (release artifacts are the single source of truth).
+  LIBTELEPROTO3_TAG: lib-v0.8.0
 
 jobs:
   build:
@@ -31,14 +34,25 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Clone teleproto3 sibling.
-        # Story 2-7 / Telegram/CMakeLists.txt:86-106 requires the
-        # teleproto3 source tree at ${CMAKE_SOURCE_DIR}/../../teleproto3
-        # (i.e. as a workspace sibling of tdesktop). actions/checkout
-        # cannot place files outside GITHUB_WORKSPACE; use git clone.
+      - name: Fetch prebuilt libteleproto3 (release ${{ env.LIBTELEPROTO3_TAG }}).
+        # tdesktop's CMakeLists expects the teleproto3 tree as a workspace sibling
+        # (${CMAKE_SOURCE_DIR}/../../teleproto3 → here ../teleproto3) with:
+        #   lib/build/libteleproto3.a  (default LIBTELEPROTO3_LIB_PATH)
+        #   lib/include/               (headers)
+        #   spec/ux-strings.yaml       (Type3 codegen)
+        # Download + extract the prebuilt artifact instead of building from source.
+        # The lib-v0.8.0 archive is built with the t3_client_* API (T3_BUILD_CLIENT),
+        # so no source build is needed. Archive layout is ./lib/{libteleproto3.a,
+        # include/} + ./spec/...; copy the static lib to the cmake-expected lib/build/.
         run: |
-          git clone --depth=1 https://github.com/ankuper/teleproto3.git ../teleproto3
-          ls -la ../teleproto3/lib/include
+          mkdir -p ../teleproto3
+          curl -fL --retry 3 \
+            "https://github.com/ankuper/teleproto3/releases/download/${LIBTELEPROTO3_TAG}/libteleproto3-linux-x86_64.tar.gz" \
+            -o /tmp/libteleproto3.tar.gz
+          tar -xzf /tmp/libteleproto3.tar.gz -C ../teleproto3
+          mkdir -p ../teleproto3/lib/build
+          cp ../teleproto3/lib/libteleproto3.a ../teleproto3/lib/build/libteleproto3.a
+          ls -la ../teleproto3/lib/build/libteleproto3.a ../teleproto3/lib/include ../teleproto3/spec/ux-strings.yaml
 
       - name: First set up.
         run: |
@@ -80,23 +94,6 @@ jobs:
         run: |
           rm -rf ${{ runner.temp }}/.buildx-cache
           mv ${{ runner.temp }}/.buildx-cache{-new,}
-
-      - name: Build libteleproto3.a (Linux reference toolchain).
-        run: |
-          docker run --rm \
-            -u $(id -u) \
-            -v $(realpath ..)/teleproto3:/usr/src/teleproto3 \
-            -w /usr/src/teleproto3 \
-            $IMAGE_TAG \
-            bash -c "
-              cmake -S lib -B lib/build \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DT3_CSPRNG_BACKEND=linux \
-                -DT3_BUILD_CLIENT=ON \
-                -DT3_BUILD_TESTS=OFF && \
-              cmake --build lib/build --config Release
-            "
-          ls -la ../teleproto3/lib/build/libteleproto3.a
 
       - name: Patch ThirdParty dispatch (suppress Wsign-conversion in event_epoll.c).
         # dispatch/DispatchCompilerWarnings.cmake enables -Wsign-conversion -Werror.
