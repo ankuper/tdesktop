@@ -33,6 +33,9 @@ jobs:
       UPLOAD_ARTIFACT: "true"
       ONLY_CACHE: "false"
       PREPARE_PATH: "Telegram/build/prepare/prepare.py"
+      # Consume the prebuilt libteleproto3 from the teleproto3 release instead of
+      # building it from source (release artifacts are the single source of truth).
+      LIBTELEPROTO3_TAG: "lib-v0.8.0"
 
     defaults:
       run:
@@ -56,12 +59,26 @@ jobs:
           submodules: recursive
           path: ${{ env.TBUILD }}\${{ env.REPO_NAME }}
 
-      - name: Clone teleproto3 (sibling).
-        uses: actions/checkout@v6
-        with:
-          repository: ankuper/teleproto3
-          path: ${{ env.TBUILD }}\teleproto3
-          fetch-depth: 1
+      - name: Fetch prebuilt libteleproto3 (release ${{ env.LIBTELEPROTO3_TAG }}).
+        # tdesktop's CMakeLists expects the teleproto3 tree as a workspace sibling
+        # (%TBUILD%\teleproto3) with lib/include/ headers and spec/. The Windows
+        # static lib is named teleproto3.lib (no "lib" prefix); the build step below
+        # passes -D LIBTELEPROTO3_LIB_PATH=%LIBTELEPROTO3_LIB_PATH%, so we export it
+        # here pointing at the cmake-expected lib\build\teleproto3.lib. lib-v0.8.0
+        # ships the t3_client_* API (T3_BUILD_CLIENT). Download + extract the prebuilt
+        # artifact (zip layout: lib/{teleproto3.lib,include/} + spec/...) instead of
+        # building from source.
+        shell: bash
+        run: |
+          mkdir -p "$TBUILD/teleproto3"
+          curl -fL --retry 3 \
+            "https://github.com/ankuper/teleproto3/releases/download/${LIBTELEPROTO3_TAG}/libteleproto3-windows-x86_64.zip" \
+            -o /tmp/libteleproto3.zip
+          unzip -o /tmp/libteleproto3.zip -d "$TBUILD/teleproto3"
+          mkdir -p "$TBUILD/teleproto3/lib/build"
+          cp "$TBUILD/teleproto3/lib/teleproto3.lib" "$TBUILD/teleproto3/lib/build/teleproto3.lib"
+          ls -la "$TBUILD/teleproto3/lib/build/teleproto3.lib" "$TBUILD/teleproto3/lib/include" "$TBUILD/teleproto3/spec/ux-strings.yaml"
+          echo "LIBTELEPROTO3_LIB_PATH=$TBUILD\\teleproto3\\lib\\build\\teleproto3.lib" >> $GITHUB_ENV
 
       - name: First set up.
         shell: bash
@@ -177,46 +194,6 @@ jobs:
           GYP_MSVS_VERSION: 2022
         run: |
           %TBUILD%\%REPO_NAME%\Telegram\build\prepare\win.bat silent qt6
-
-      - name: Locate OpenSSL from prepare output.
-        shell: pwsh
-        run: |
-          # prepare/win.bat builds OpenSSL under %LibrariesPath%\openssl3\ with
-          # non-standard layout: include\openssl\ for headers, out\ for Release libs.
-          $root = "$env:LibrariesPath\openssl3"
-          if (-not (Test-Path "$root\include\openssl\opensslv.h")) {
-            Write-Error "OpenSSL headers not found at $root\include\openssl\opensslv.h. Listing for diagnosis:"
-            Get-ChildItem -Path $env:LibrariesPath -Recurse -Filter "opensslv.h" -ErrorAction SilentlyContinue | Select-Object FullName
-            exit 1
-          }
-          if (-not (Test-Path "$root\out\libcrypto.lib")) {
-            Write-Error "libcrypto.lib not found at $root\out\libcrypto.lib"
-            Get-ChildItem -Path $env:LibrariesPath -Recurse -Filter "libcrypto.lib" -ErrorAction SilentlyContinue | Select-Object FullName
-            exit 1
-          }
-          echo "OPENSSL3_DIR=$root" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          Write-Host "OpenSSL located at $root (include=$root\include, libs=$root\out)"
-
-      - name: libteleproto3 build (MSVC x64, against tdesktop's OpenSSL, /MT).
-        if: env.ONLY_CACHE == 'false'
-        shell: cmd
-        run: |
-          cd %TBUILD%\teleproto3\lib
-          cmake -B build -G "Ninja" ^
-            -DCMAKE_BUILD_TYPE=Release ^
-            -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded ^
-            -DT3_BUILD_CLIENT=ON ^
-            -DT3_BUILD_TESTS=OFF ^
-            -DOPENSSL_INCLUDE_DIR="%OPENSSL3_DIR%\include" ^
-            -DOPENSSL_CRYPTO_LIBRARY="%OPENSSL3_DIR%\out\libcrypto.lib" ^
-            -DOPENSSL_SSL_LIBRARY="%OPENSSL3_DIR%\out\libssl.lib"
-          cmake --build build --parallel
-          if not exist build\teleproto3.lib (
-            echo FAIL: teleproto3.lib not produced
-            dir build
-            exit /b 1
-          )
-          echo LIBTELEPROTO3_LIB_PATH=%TBUILD%\teleproto3\lib\build\teleproto3.lib>>%GITHUB_ENV%
 
       - name: Free up some disk space.
         shell: bash

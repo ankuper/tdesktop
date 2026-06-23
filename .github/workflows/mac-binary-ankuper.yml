@@ -40,6 +40,9 @@ jobs:
       ONLY_CACHE: "false"
       MANUAL_CACHING: "1"
       AUTO_CACHING: "1"
+      # Consume the prebuilt libteleproto3 from the teleproto3 release instead of
+      # building it from source (release artifacts are the single source of truth).
+      LIBTELEPROTO3_TAG: "lib-v0.8.0"
 
     steps:
       - name: Get repository name.
@@ -52,12 +55,26 @@ jobs:
           path: ${{ env.REPO_NAME }}
           fetch-depth: 0
 
-      - name: Clone teleproto3 (sibling).
-        # tdesktop's CMakeLists assumes teleproto3 at ${CMAKE_SOURCE_DIR}/../../teleproto3.
-        # actions/checkout cannot place files outside GITHUB_WORKSPACE; use git clone.
+      - name: Fetch prebuilt libteleproto3 (release ${{ env.LIBTELEPROTO3_TAG }}).
+        # tdesktop's CMakeLists assumes teleproto3 at ${CMAKE_SOURCE_DIR}/../../teleproto3
+        # (here ../teleproto3, a workspace sibling) with:
+        #   lib/build/libteleproto3.a  (default LIBTELEPROTO3_LIB_PATH — this workflow
+        #                               does NOT override it, so the default applies)
+        #   lib/include/               (headers)
+        #   spec/ux-strings.yaml       (Type3 codegen)
+        # Download + extract the prebuilt macOS (arm64, macos-latest runner) artifact
+        # instead of building from source. lib-v0.8.0 ships the t3_client_* API
+        # (T3_BUILD_CLIENT). Archive layout is ./lib/{libteleproto3.a,include/} +
+        # ./spec/...; copy the static lib to the cmake-expected lib/build/.
         run: |
-          git clone --depth=1 https://github.com/ankuper/teleproto3.git ../teleproto3
-          ls -la ../teleproto3/lib/include ../teleproto3/spec/ux-strings.yaml
+          mkdir -p ../teleproto3
+          curl -fL --retry 3 \
+            "https://github.com/ankuper/teleproto3/releases/download/${LIBTELEPROTO3_TAG}/libteleproto3-macos-arm64.tar.gz" \
+            -o /tmp/libteleproto3.tar.gz
+          tar -xzf /tmp/libteleproto3.tar.gz -C ../teleproto3
+          mkdir -p ../teleproto3/lib/build
+          cp ../teleproto3/lib/libteleproto3.a ../teleproto3/lib/build/libteleproto3.a
+          ls -la ../teleproto3/lib/build/libteleproto3.a ../teleproto3/lib/include ../teleproto3/spec/ux-strings.yaml
 
       - name: First set up.
         run: |
@@ -133,18 +150,6 @@ jobs:
           cmake -Bbuild . -DCMAKE_INSTALL_PREFIX=$LibrariesPath/local/tde2e -DTD_E2E_ONLY=ON
           cmake --build build
           cmake --install build
-
-      - name: libteleproto3 build.
-        if: env.ONLY_CACHE == 'false'
-        run: |
-          cd $GITHUB_WORKSPACE/../teleproto3/lib
-          cmake -Bbuild . \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DT3_BUILD_CLIENT=ON \
-            -DT3_BUILD_TESTS=OFF \
-            -DOPENSSL_ROOT_DIR=$(brew --prefix openssl@3)
-          cmake --build build --parallel
-          test -f build/libteleproto3.a
 
       - name: Telegram Desktop build.
         if: env.ONLY_CACHE == 'false'
