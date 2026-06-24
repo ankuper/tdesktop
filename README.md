@@ -1,99 +1,79 @@
-# [Telegram Desktop][telegram_desktop] – Official Messenger
+<!-- Язык / Language: [Русский](#t3chatm) · [English](#t3chatm-en) -->
 
-This is the complete source code and the build instructions for the official [Telegram][telegram] messenger desktop client, based on the [Telegram API][telegram_api] and the [MTProto][telegram_proto] secure protocol.
+<a name="t3chatm"></a>
+# T3ChatM
 
-[![Version](https://badge.fury.io/gh/telegramdesktop%2Ftdesktop.svg)](https://github.com/telegramdesktop/tdesktop/releases)
-[![Build Status](https://github.com/telegramdesktop/tdesktop/workflows/Windows./badge.svg)](https://github.com/telegramdesktop/tdesktop/actions)
-[![Build Status](https://github.com/telegramdesktop/tdesktop/workflows/MacOS./badge.svg)](https://github.com/telegramdesktop/tdesktop/actions)
-[![Build Status](https://github.com/telegramdesktop/tdesktop/workflows/Linux./badge.svg)](https://github.com/telegramdesktop/tdesktop/actions)
-[![Built with Depot](https://img.shields.io/badge/Built%20with-Depot.dev-46A75A)](https://depot.dev)
+**Telegram, который работает в РФ — без VPN и без настройки.**
 
-[![Preview of Telegram Desktop][preview_image]][preview_image_url]
+Форк Telegram со встроенным транспортом **Type3 (mtProxy3)**: трафик идёт внутри
+обычного HTTPS, поэтому DPI/ТСПУ видит веб-трафик, а не Telegram. Прокси уже
+зашит в сборку — скачал и открыл.
 
-The source code is published under GPLv3 with OpenSSL exception, the license is available [here][license].
+## Скачать
 
-## Supported systems
+| Платформа | Ссылка |
+|---|---|
+| Desktop (Windows / macOS / Linux) | https://github.com/ankuper/tdesktop/releases/latest |
+| Android (APK) | https://github.com/ankuper/telegram-android/releases/latest |
+| iOS | https://github.com/ankuper/telegram-ios/releases |
 
-The latest version is available for
+Установи и открой. Настраивать ничего не нужно — прокси встроен.
 
-* [Windows 7 and above (64 bit)](https://telegram.org/dl/desktop/win64) ([portable](https://telegram.org/dl/desktop/win64_portable))
-* [Windows 7 and above (32 bit)](https://telegram.org/dl/desktop/win) ([portable](https://telegram.org/dl/desktop/win_portable))
-* [macOS 10.13 and above](https://telegram.org/dl/desktop/mac)
-* [Linux static build for 64 bit](https://telegram.org/dl/desktop/linux)
-* [Snap](https://snapcraft.io/telegram-desktop)
-* [Flatpak](https://flathub.org/apps/details/org.telegram.desktop)
+## Свой прокси (независимость / резерв)
 
-## Old system versions
+Если дефолтный прокси недоступен — подними свой
+[teleproxy](https://github.com/ankuper/teleproxy) (~5 мин, Docker) и укажи его в
+**Настройки → Подключение → Прокси**.
 
-Version **4.9.9** was the last that supports older systems
+## Как это работает
 
-* [macOS 10.12](https://updates.tdesktop.com/tmac/tsetup.4.9.9.dmg)
-* [Linux with glibc < 2.28 static build](https://updates.tdesktop.com/tlinux/tsetup.4.9.9.tar.xz)
+MTProto заворачивается в HTTP-stream поверх TLS (протокол **Type3**) — для DPI
+неотличимо от обычного HTTPS. Описание протокола и библиотека:
+[teleproto3](https://github.com/ankuper/teleproto3).
 
-Version **2.4.4** was the last that supports older systems
+---
 
-* [OS X 10.10 and 10.11](https://updates.tdesktop.com/tosx/tsetup-osx.2.4.4.dmg)
-* [Linux static build for 32 bit](https://updates.tdesktop.com/tlinux32/tsetup32.2.4.4.tar.xz)
+<a name="t3chatm-en"></a>
+# T3ChatM (English)
 
-Version **1.8.15** was the last that supports older systems
+**Telegram that works under censorship — no VPN, no setup.**
 
-* [Windows XP and Vista](https://updates.tdesktop.com/tsetup/tsetup.1.8.15.exe) ([portable](https://updates.tdesktop.com/tsetup/tportable.1.8.15.zip))
-* [OS X 10.8 and 10.9](https://updates.tdesktop.com/tmac/tsetup.1.8.15.dmg)
-* [OS X 10.6 and 10.7](https://updates.tdesktop.com/tmac32/tsetup32.1.8.15.dmg)
+A Telegram fork with the built-in **Type3 (mtProxy3)** transport: traffic is
+tunneled inside ordinary HTTPS, so DPI sees web traffic, not Telegram. The proxy
+is baked into the build — just download and open.
 
-## Third-party
+## Download
 
-* Qt 6 ([LGPL](http://doc.qt.io/qt-6/lgpl.html)) and Qt 5.15 ([LGPL](http://doc.qt.io/qt-5/lgpl.html)) slightly patched
-* OpenSSL 3.2.1 ([Apache License 2.0](https://openssl-library.org/source/license/apache-license-2.0.txt))
-* WebRTC ([New BSD License](https://github.com/desktop-app/tg_owt/blob/master/LICENSE))
-* zlib ([zlib License](http://www.zlib.net/zlib_license.html))
-* LZMA SDK 9.20 ([public domain](http://www.7-zip.org/sdk.html))
-* liblzma ([public domain](http://tukaani.org/xz/))
-* Google Breakpad ([License](https://chromium.googlesource.com/breakpad/breakpad/+/master/LICENSE))
-* Google Crashpad ([Apache License 2.0](https://chromium.googlesource.com/crashpad/crashpad/+/master/LICENSE))
-* GYP ([BSD License](https://github.com/bnoordhuis/gyp/blob/master/LICENSE))
-* Ninja ([Apache License 2.0](https://github.com/ninja-build/ninja/blob/master/COPYING))
-* OpenAL Soft ([LGPL](https://github.com/kcat/openal-soft/blob/master/COPYING))
-* Opus codec ([BSD License](http://www.opus-codec.org/license/))
-* FFmpeg ([LGPL](https://www.ffmpeg.org/legal.html))
-* Guideline Support Library ([MIT License](https://github.com/Microsoft/GSL/blob/master/LICENSE))
-* Range-v3 ([Boost License](https://github.com/ericniebler/range-v3/blob/master/LICENSE.txt))
-* Open Sans font ([Apache License 2.0](http://www.apache.org/licenses/LICENSE-2.0.html))
-* Vazirmatn font ([SIL Open Font License 1.1](https://github.com/rastikerdar/vazirmatn/blob/master/OFL.txt))
-* Emoji alpha codes ([MIT License](https://github.com/emojione/emojione/blob/master/extras/alpha-codes/LICENSE.md))
-* xxHash ([BSD License](https://github.com/Cyan4973/xxHash/blob/dev/LICENSE))
-* QR Code generator ([MIT License](https://github.com/nayuki/QR-Code-generator#license))
-* CMake ([New BSD License](https://github.com/Kitware/CMake/blob/master/Copyright.txt))
-* Hunspell ([LGPL](https://github.com/hunspell/hunspell/blob/master/COPYING.LESSER))
-* Ada ([Apache License 2.0](https://github.com/ada-url/ada/blob/main/LICENSE-APACHE))
+| Platform | Link |
+|---|---|
+| Desktop (Windows / macOS / Linux) | https://github.com/ankuper/tdesktop/releases/latest |
+| Android (APK) | https://github.com/ankuper/telegram-android/releases/latest |
+| iOS | https://github.com/ankuper/telegram-ios/releases |
 
-## Build instructions
+Install and open. No configuration needed — the proxy is built in.
 
-* [Windows (32-bit and 64-bit)][win]
-* [macOS][mac]
-* [GNU/Linux using Docker][linux]
+## Run your own proxy (independence / fallback)
 
-[//]: # (LINKS)
-[telegram]: https://telegram.org
-[telegram_desktop]: https://desktop.telegram.org
-[telegram_api]: https://core.telegram.org
-[telegram_proto]: https://core.telegram.org/mtproto
-[license]: LICENSE
-[win]: docs/building-win.md
-[mac]: docs/building-mac.md
-[linux]: docs/building-linux.md
-[preview_image]: https://github.com/telegramdesktop/tdesktop/blob/dev/docs/assets/preview.png "Preview of Telegram Desktop"
-[preview_image_url]: https://raw.githubusercontent.com/telegramdesktop/tdesktop/dev/docs/assets/preview.png
+Run your own [teleproxy](https://github.com/ankuper/teleproxy) (~5 min, Docker)
+and set it in **Settings → Connection → Proxy**.
 
-## Thanks to
+## How it works
 
-<a href="https://depot.dev">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://depot.dev/assets/brand/1693758816/depot-logo-horizontal-on-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="https://depot.dev/assets/brand/1693758816/depot-logo-horizontal-on-light.svg">
-    <img alt="Depot" src="https://depot.dev/assets/brand/1693758816/depot-logo-horizontal-on-light.svg" width="150">
-  </picture>
-</a>
+MTProto is wrapped in an HTTP-stream over TLS (the **Type3** protocol) — to DPI
+it's indistinguishable from regular HTTPS. Protocol spec and library:
+[teleproto3](https://github.com/ankuper/teleproto3).
 
-CI infrastructure sponsored by [Depot](https://depot.dev) — fast GitHub Actions runners.
+---
 
+## Поддержать инфраструктуру · Support
+
+Проект держится на одном прокси. Поддержать сервера (TON):
+
+`UQAYS0k0PEky8BUE1Rij90v8-CmOWsuhAzdLTHOzYC-qZ0pV`
+
+The project runs on a single proxy. Support the servers (TON) — address above.
+
+---
+
+> Независимый форк, не аффилирован с Telegram Messenger.
+> Independent fork, not affiliated with Telegram Messenger.
