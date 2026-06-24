@@ -11,11 +11,11 @@
 
 ## Скачать
 
-| Платформа | Ссылка |
-|---|---|
-| Desktop (Windows / macOS / Linux) | https://github.com/ankuper/tdesktop/releases/latest |
-| Android (APK) | https://github.com/ankuper/telegram-android/releases/latest |
-| iOS | https://github.com/ankuper/telegram-ios/releases |
+| Платформа | Статус | Ссылка |
+|---|---|---|
+| Desktop (Windows / macOS / Linux) | **бета** — проверен только macOS (Apple Silicon); Windows и Linux пока не проверены | https://github.com/ankuper/tdesktop/releases/latest |
+| Android (APK) | релиз | https://github.com/ankuper/telegram-android/releases/latest |
+| iOS | **в процессе** | — |
 
 Установи и открой. Настраивать ничего не нужно — прокси встроен.
 
@@ -44,11 +44,11 @@ is baked into the build — just download and open.
 
 ## Download
 
-| Platform | Link |
-|---|---|
-| Desktop (Windows / macOS / Linux) | https://github.com/ankuper/tdesktop/releases/latest |
-| Android (APK) | https://github.com/ankuper/telegram-android/releases/latest |
-| iOS | https://github.com/ankuper/telegram-ios/releases |
+| Platform | Status | Link |
+|---|---|---|
+| Desktop (Windows / macOS / Linux) | **beta** — only macOS (Apple Silicon) verified; Windows and Linux untested | https://github.com/ankuper/tdesktop/releases/latest |
+| Android (APK) | release | https://github.com/ankuper/telegram-android/releases/latest |
+| iOS | **in progress** | — |
 
 Install and open. No configuration needed — the proxy is built in.
 
