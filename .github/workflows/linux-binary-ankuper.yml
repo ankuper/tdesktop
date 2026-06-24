@@ -62,6 +62,10 @@ jobs:
           poetry install
           DOCKERFILE=$(DEBUG= LTO= poetry run gen_dockerfile)
           echo "$DOCKERFILE" > Dockerfile
+          # secure_store_linux.cpp requires libsecret-1 (story 2.4); upstream's centos
+          # image doesn't ship it, so inject it into the generated dnf package list.
+          sed -i 's/gtk3-devel/gtk3-devel libsecret-devel dbus-devel/' Dockerfile
+          grep -q libsecret-devel Dockerfile || { echo "FAIL: could not inject libsecret-devel (gtk3-devel anchor not found in generated Dockerfile)"; exit 1; }
           rm -rf __pycache__
 
       - name: Free up some disk space.
