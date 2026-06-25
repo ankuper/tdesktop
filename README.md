@@ -1,14 +1,16 @@
 # [Telegram Desktop][telegram_desktop] – Official Messenger
 
-## T3ChatM — install on macOS (Apple Silicon)
+## T3ChatM — install on macOS (Apple Silicon & Intel)
 
 T3ChatM ships an **unsigned** `.dmg`, so macOS quarantines it and kills the app on
 first launch (`Killed: 9`) until the quarantine is cleared and an ad-hoc signature is
-applied. Download the latest release, install and launch in one line:
+applied. The snippet auto-detects your CPU (Apple Silicon → `arm64`, Intel →
+`x86_64`), downloads the matching release, installs and launches in one line:
 
 ```bash
+ARCH=$(uname -m)   # arm64 (Apple Silicon) | x86_64 (Intel)
 DMG=$(curl -fsSL https://api.github.com/repos/ankuper/tdesktop/releases/latest \
-  | grep -o 'https://[^"]*macOS-arm64[^"]*\.dmg' | head -1)
+  | grep -o "https://[^\"]*macOS-${ARCH}[^\"]*\.dmg" | head -1)
 curl -L "$DMG" -o /tmp/T3ChatM.dmg && \
 hdiutil attach /tmp/T3ChatM.dmg -nobrowse && \
 rm -rf "/Applications/T3ChatM.app" && \
